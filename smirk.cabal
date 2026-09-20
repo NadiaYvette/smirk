@@ -8,8 +8,8 @@ description:
     dual algebraic effect interpreters (effectful & polysemy), and mono-traversable
     sequence polymorphism (Text, ByteString, Seq, Vector, NonEmpty).
 license:            Apache-2.0
-author:             Nadia Yvette
-maintainer:         nadia@example.com
+author:             Nadia Yvette Chambers
+maintainer:         Nadia Chambers <nadia.yvette.chambers@ik.me>
 category:           Text, Regex, Effects
 build-type:         Simple
 extra-doc-files:    README.md
@@ -55,20 +55,14 @@ library
         Smirk.Core.Quote
         Smirk.Engine.Sequence
         Smirk.Engine.VM
-        Smirk.Effect.Effectful
-        Smirk.Effect.Polysemy
         Smirk.Glob
     build-depends:
         base >= 4.16 && < 5,
         containers,
         bytestring,
-        effectful >= 2.0 && < 3,
-        effectful-core >= 2.0 && < 3,
-        effectful-th >= 1.0 && < 2,
         megaparsec >= 9.0,
         mono-traversable,
         parser-combinators,
-        polysemy >= 1.9,
         template-haskell,
         text >= 2.0,
         vector
@@ -82,16 +76,13 @@ test-suite smirk-test
         ParserSpec
         VMSpec
         SequenceSpec
-        EffectSpec
         QuoteSpec
         GlobSpec
     build-depends:
         base,
         bytestring,
         containers,
-        effectful,
         hspec,
-        polysemy,
         smirk,
         text,
         vector

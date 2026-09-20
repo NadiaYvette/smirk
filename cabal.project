@@ -1,1 +1,9 @@
-packages: .
+packages:
+    ./smirk.cabal
+    ./effectful/smirk-effectful.cabal
+    ./polysemy/smirk-polysemy.cabal
+    ../polysemy
+
+-- Development compiler: recent 9.12 series (matches kuroko's 9.12.2 closely;
+-- older-GHC compatibility is deferred to productisation).
+with-compiler: ghc-9.12.4

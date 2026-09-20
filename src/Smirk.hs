@@ -46,9 +46,6 @@ module Smirk
   , runMatchAt
   , resumeMatch
   , findAllMatches
-
-    -- * Algebraic Effects
-  , module Smirk.Effect.Effectful
   ) where
 
 import Data.Text (Text)
@@ -58,7 +55,6 @@ import Smirk.Core.Bytecode
 import Smirk.Core.Compiler
 import Smirk.Core.Parser
 import Smirk.Core.Quote
-import Smirk.Effect.Effectful
 import Smirk.Engine.Sequence
 import Smirk.Engine.VM
 import Smirk.Glob

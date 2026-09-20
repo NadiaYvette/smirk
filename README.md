@@ -2,6 +2,18 @@
 
 **Smirk** is a 100% native Haskell Perl-Compatible Regular Expression (PCRE) engine. It provides high-assurance, pure functional regular expression matching without C dependencies, buffer allocations, or FFI overhead.
 
+## Packages
+
+Smirk is split into three packages so the effect interfaces don't drag each other in:
+
+| Package | Cabal file | Contents |
+| :--- | :--- | :--- |
+| **`smirk`** (core) | `smirk.cabal` | PCRE parser/AST/bytecode/VM, glob engine, sequence polymorphism, quasiquoters. No effect-system dependency. |
+| **`smirk-effectful`** | `smirk-effectful.cabal` | `Smirk.Effect.Effectful` — `RegexEngine` as an `effectful` first-class effect (pure & fuel-bounded interpreters). Depends on `smirk` + `effectful`. |
+| **`smirk-polysemy`** | `smirk-polysemy.cabal` | `Smirk.Effect.Polysemy` — `RegexEngine` as a `polysemy` effect (pure & fuel-bounded interpreters). Depends on `smirk` + `polysemy`. |
+
+Consumers pick only the interface they use (module paths are unchanged from the monolithic layout).
+
 ## Key Features
 
 1. **Step-Bounded Execution & ReDoS Defense**:
