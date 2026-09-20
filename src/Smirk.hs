@@ -11,9 +11,19 @@ module Smirk
   , execMatch
   , execMatchWithFuel
 
+    -- * Glob Matching
+  , compileGlob
+  , compileGlobWithOptions
+  , compileWildcard
+  , GlobOptions (..)
+  , defaultGlobOptions
+  , wildcardGlobOptions
+  , matchGlob
+
     -- * QuasiQuoters & Editors
   , re
   , ed
+  , glob
   , Editor (..)
   , applyEditor
 
@@ -51,6 +61,7 @@ import Smirk.Core.Quote
 import Smirk.Effect.Effectful
 import Smirk.Engine.Sequence
 import Smirk.Engine.VM
+import Smirk.Glob
 
 -- | Compile a PCRE regular expression string into a runnable 'Regex'.
 compileRegex :: Text -> Either Text Regex
