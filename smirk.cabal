@@ -1,0 +1,95 @@
+cabal-version:      3.0
+name:               smirk
+version:            0.1.0.0
+synopsis:           Pure, effectful, resumable, step-budgeted PCRE interpreter for Haskell
+description:
+    Smirk (;-P / ;-) is a pure, native Haskell PCRE regular expression engine
+    featuring step-bounded execution (ReDoS defense), pausable/resumable matching,
+    dual algebraic effect interpreters (effectful & polysemy), and mono-traversable
+    sequence polymorphism (Text, ByteString, Seq, Vector, NonEmpty).
+license:            Apache-2.0
+author:             Nadia Yvette
+maintainer:         nadia@example.com
+category:           Text, Regex, Effects
+build-type:         Simple
+extra-doc-files:    README.md
+
+common common-options
+    default-language:   GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DuplicateRecordFields
+        GADTs
+        GeneralizedNewtypeDeriving
+        LambdaCase
+        MultiParamTypeClasses
+        OverloadedRecordDot
+        OverloadedStrings
+        RankNTypes
+        RecordWildCards
+        ScopedTypeVariables
+        TypeApplications
+        TypeFamilies
+        TypeOperators
+    ghc-options:
+        -Wall
+        -Wcompat
+        -Widentities
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wpartial-fields
+        -Wredundant-constraints
+
+library
+    import:             common-options
+    hs-source-dirs:     src
+    exposed-modules:
+        Smirk
+        Smirk.Core.AST
+        Smirk.Core.Parser
+        Smirk.Core.Bytecode
+        Smirk.Core.Compiler
+        Smirk.Core.Quote
+        Smirk.Engine.Sequence
+        Smirk.Engine.VM
+        Smirk.Effect.Effectful
+        Smirk.Effect.Polysemy
+    build-depends:
+        base >= 4.16 && < 5,
+        containers,
+        bytestring,
+        effectful >= 2.0 && < 3,
+        effectful-core >= 2.0 && < 3,
+        effectful-th >= 1.0 && < 2,
+        megaparsec >= 9.0,
+        mono-traversable,
+        parser-combinators,
+        polysemy >= 1.9,
+        template-haskell,
+        text >= 2.0,
+        vector
+
+test-suite smirk-test
+    import:             common-options
+    type:               exitcode-stdio-1.0
+    hs-source-dirs:     test
+    main-is:            Spec.hs
+    other-modules:
+        ParserSpec
+        VMSpec
+        SequenceSpec
+        EffectSpec
+        QuoteSpec
+    build-depends:
+        base,
+        bytestring,
+        containers,
+        effectful,
+        hspec,
+        polysemy,
+        smirk,
+        text,
+        vector
