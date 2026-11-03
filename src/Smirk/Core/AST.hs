@@ -1,6 +1,16 @@
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 
+{- |
+Module      : Smirk.Core.AST
+Description : Abstract Syntax Tree representation of PCRE regular expressions
+Copyright   : (c) Nadia Yvette Chambers, 2026
+License     : Apache-2.0
+
+Defines the typed Abstract Syntax Tree (AST) for PCRE regular expressions,
+supporting literals, character classes, anchors, sequences, alternations,
+bounded repetitions with greediness controls, named/numbered capture groups,
+and lookaround assertions.
+-}
 module Smirk.Core.AST
   ( AST (..)
   , CharClass (..)
@@ -15,14 +25,14 @@ module Smirk.Core.AST
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
--- | Regex compilation and matching flags.
+-- | Regex compilation and matching flags controlling parser and VM semantics.
 data Flags = Flags
-  { caseInsensitive :: !Bool -- ^ (?i)
-  , dotAll          :: !Bool -- ^ (?s) dot matches newline
-  , multiline       :: !Bool -- ^ (?m) ^ and $ match line boundaries
+  { caseInsensitive :: !Bool -- ^ (?i) Case-insensitive character matching
+  , dotAll          :: !Bool -- ^ (?s) Dot matches newline characters as well
+  , multiline       :: !Bool -- ^ (?m) ^ and $ match at beginning and end of each line
   } deriving (Eq, Show, Generic)
 
--- | Default flags (standard PCRE mode).
+-- | Default flags (standard PCRE mode: case-sensitive, no dotAll, no multiline).
 defaultFlags :: Flags
 defaultFlags = Flags
   { caseInsensitive = False
@@ -32,55 +42,55 @@ defaultFlags = Flags
 
 -- | Character range within a character set ([a-z], [0-9]).
 data CharRange
-  = RangeSingle !Char
-  | RangeBetween !Char !Char
+  = RangeSingle !Char          -- ^ Single character: 'a'
+  | RangeBetween !Char !Char   -- ^ Inclusive character range: 'a' to 'z'
   deriving (Eq, Show, Generic)
 
--- | Character classes and sets.
+-- | Character classes and custom character sets.
 data CharClass
-  = ClassAny                      -- ^ . (any character, subject to dotAll)
-  | ClassDigit                    -- ^ \d
-  | ClassNotDigit                 -- ^ \D
-  | ClassWord                     -- ^ \w
-  | ClassNotWord                  -- ^ \W
-  | ClassSpace                    -- ^ \s
-  | ClassNotSpace                 -- ^ \S
-  | ClassSet ![CharRange] !Bool   -- ^ [a-z0-9] or [^a-z] (negated if True)
+  = ClassAny                      -- ^ @.@ (any character, subject to dotAll)
+  | ClassDigit                    -- ^ @\\d@ (ASCII or Unicode decimal digit)
+  | ClassNotDigit                 -- ^ @\\D@ (any character that is not a digit)
+  | ClassWord                     -- ^ @\\w@ (word character: alphanumeric plus underscore)
+  | ClassNotWord                  -- ^ @\\W@ (non-word character)
+  | ClassSpace                    -- ^ @\\s@ (whitespace character)
+  | ClassNotSpace                 -- ^ @\\S@ (non-whitespace character)
+  | ClassSet ![CharRange] !Bool   -- ^ @[a-z0-9]@ or negated @[^a-z]@ (negated when True)
   deriving (Eq, Show, Generic)
 
--- | Position and boundary assertions.
+-- | Position and boundary assertions that do not consume characters.
 data Anchor
-  = AnchorStart         -- ^ ^
-  | AnchorEnd           -- ^ $
-  | AnchorWordBoundary  -- ^ \b
-  | AnchorNotWordBoundary -- ^ \B
+  = AnchorStart                   -- ^ @^@ (start of input or start of line in multiline mode)
+  | AnchorEnd                     -- ^ @$@ (end of input or end of line in multiline mode)
+  | AnchorWordBoundary            -- ^ @\\b@ (word boundary transition)
+  | AnchorNotWordBoundary         -- ^ @\\B@ (non-word boundary transition)
   deriving (Eq, Show, Generic)
 
--- | Repetition greediness.
+-- | Repetition greediness and backtracking strategy.
 data RepKind
-  = RepGreedy
-  | RepLazy
-  | RepPossessive
+  = RepGreedy                     -- ^ Standard greedy repetition (match as much as possible)
+  | RepLazy                       -- ^ Non-greedy / reluctant repetition (match as little as possible)
+  | RepPossessive                 -- ^ Possessive repetition (do not backtrack over matched elements)
   deriving (Eq, Show, Generic)
 
--- | Lookaround direction.
+-- | Lookaround assertion direction.
 data LookDir
-  = Lookahead
-  | Lookbehind
+  = Lookahead                     -- ^ Lookahead assertion: inspecting suffix after current position
+  | Lookbehind                    -- ^ Lookbehind assertion: inspecting prefix before current position
   deriving (Eq, Show, Generic)
 
--- | Typed PCRE Abstract Syntax Tree.
+-- | Typed PCRE Abstract Syntax Tree nodes.
 data AST
-  = Lit !Char
-  | Class !CharClass
-  | AnchorAssert !Anchor
-  | Seq ![AST]
-  | Alt ![AST]
-  | Repeat !Int !(Maybe Int) !RepKind !AST       -- ^ min, max, kind, inner
-  | Group !(Maybe Text) !(Maybe Int) !AST        -- ^ optional name, assigned group index, inner
-  | NonCapturing !AST                            -- ^ (?:...)
-  | Lookaround !LookDir !Bool !AST               -- ^ dir, isPositive, inner
-  | BackRef !Int                                 -- ^ \1
-  | NamedBackRef !Text                           -- ^ \k<name>
-  | Empty
+  = Lit !Char                                    -- ^ Exact literal character match
+  | Class !CharClass                             -- ^ Character class or set match
+  | AnchorAssert !Anchor                         -- ^ Zero-width boundary anchor assertion
+  | Seq ![AST]                                   -- ^ Sequential concatenation of sub-expressions
+  | Alt ![AST]                                   -- ^ Ordered alternation between sub-expressions
+  | Repeat !Int !(Maybe Int) !RepKind !AST       -- ^ Repetition with min count, optional max count, greediness kind, and child AST
+  | Group !(Maybe Text) !(Maybe Int) !AST        -- ^ Capturing group with optional name, 1-based index, and inner AST
+  | NonCapturing !AST                            -- ^ Non-capturing group: @(?:...)@
+  | Lookaround !LookDir !Bool !AST               -- ^ Zero-width lookaround assertion: direction, positive/negative, and inner AST
+  | BackRef !Int                                 -- ^ Numbered backreference: @\\1@
+  | NamedBackRef !Text                           -- ^ Named backreference: @\\k<name>@
+  | Empty                                        -- ^ Empty / epsilon AST node
   deriving (Eq, Show, Generic)

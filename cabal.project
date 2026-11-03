@@ -2,7 +2,11 @@ packages:
     ./smirk.cabal
     ./effectful/smirk-effectful.cabal
     ./polysemy/smirk-polysemy.cabal
-    ../polysemy
+
+source-repository-package
+    type: git
+    location: https://github.com/NadiaYvette/polysemy
+    tag: polytropos-port
 
 -- Development compiler: recent 9.12 series (matches kuroko's 9.12.2 closely;
 -- older-GHC compatibility is deferred to productisation).

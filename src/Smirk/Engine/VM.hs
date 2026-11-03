@@ -1,16 +1,45 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
 
+{- |
+Module      : Smirk.Engine.VM
+Description : Resumable, fuel-budgeted Pike-style regex virtual machine with ReDoS defense
+Copyright   : (c) Nadia Yvette Chambers, 2026
+License     : Apache-2.0
+
+Implements the bytecode virtual machine for Smirk. The engine executes a Pike-style
+nondeterministic state machine with an explicit backtracking continuation stack.
+
+=== Architectural Invariants
+
+* __ReDoS Immunity via Step-Bounding:__ Every instruction transition increments
+  the consumed step counter. When running under 'StepBudget', exceeding the limit
+  immediately yields 'OutOfFuel' with an intact 'MatchContinuation', completely
+  preventing algorithmic complexity attacks.
+* __Pausable & Resumable Continuation:__ Suspended computations retain the entire
+  thread state, backtrack stack, and program counters, enabling interactive or
+  time-sliced regex execution.
+* __Sequence Polymorphism:__ Character lookups and slice extractions are dispatched
+  via the 'RegexTarget' class without intermediate string conversions.
+-}
 module Smirk.Engine.VM
-  ( Fuel (..)
+  ( -- * Fuel & Budgeting
+    Fuel (..)
   , MatchResult (..)
   , MatchStatus (..)
   , MatchContinuation (..)
+
+    -- * Execution Entry Points
   , runMatch
   , runMatchAt
   , resumeMatch
   , findAllMatches
+
+    -- * Internal VM Engine
+  , ThreadState (..)
+  , stepVM
+  , matchClass
+  , matchAnchor
   ) where
 
 import Data.Char (isAlphaNum, isDigit, isSpace)
@@ -24,50 +53,82 @@ import Smirk.Core.AST (Anchor (..), CharClass (..), CharRange (..))
 import Smirk.Core.Bytecode (Opcode (..), Regex (..))
 import Smirk.Engine.Sequence (RegexTarget (..))
 
+{- Note [Pike VM State Machine and Backtracking Stack]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[tag:note-pike-vm-state-machine]
+Smirk's execution engine operates as a bytecode virtual machine. The compiled
+program comprises instructions like OpChar, OpSplit, OpJump, OpSaveStart, and
+OpSaveEnd.
+
+Nondeterminism from repetitions (.*, .+) and alternations (a|b) is modeled
+via OpSplit d1 d2. Branch 1 is pursued immediately while Branch 2 is pushed
+onto an explicit backtrack stack. If a thread encounters a character mismatch,
+it pops the next alternate thread from the stack.
+
+Unlike traditional recursive backtracking which consumes unbounded C call stack
+frames and exposes the runtime to stack overflows, Smirk stores thread states in
+an explicit heap-allocated list [ThreadState], bounded by the step fuel.
+-}
+
+{- Note [Fuel-Bounded Step Budget and ReDoS Defense]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[tag:note-fuel-step-budget]
+Regular Expression Denial of Service (ReDoS) occurs when malicious or pathological
+inputs trigger superlinear (e.g. O(2^N)) backtracking iterations over ambiguous
+grammars like (a+)+$.
+
+To neutralize this threat, Smirk introduces the 'Fuel' budget:
+1. Every iteration of 'stepVM' consumes exactly 1 unit of fuel.
+2. If steps >= budget, the machine halts immediately and packages the active thread
+   and backtrack stack into 'OutOfFuel (MatchContinuation ...)'.
+3. The host application can inspect the partial progress, abort, or allocate more
+   fuel to resume via 'resumeMatch'.
+-}
+
 -- | Execution fuel budget for step bounding and ReDoS prevention.
 data Fuel
-  = StepBudget !Int
-  | Unlimited
+  = StepBudget !Int    -- ^ Bounded execution: halt after N instruction steps
+  | Unlimited          -- ^ Unbounded execution: run to completion or exhaustion
   deriving (Eq, Show, Generic)
 
--- | Successful regular expression match result.
+-- | Successful regular expression match result with full capture offsets.
 data MatchResult s = MatchResult
-  { matchedSlice  :: !s
-  , matchOffset   :: !Int
-  , matchLength   :: !Int
-  , captureGroups :: !(Map Int s)
-  , namedGroups   :: !(Map Text s)
-  , stepsConsumed :: !Int
+  { matchedSlice  :: !s             -- ^ Exact matched slice of the input
+  , matchOffset   :: !Int           -- ^ 0-based character offset where match begins
+  , matchLength   :: !Int           -- ^ Total length (in characters) of the matched slice
+  , captureGroups :: !(Map Int s)   -- ^ Numbered capture groups (1-indexed)
+  , namedGroups   :: !(Map Text s)  -- ^ Named capture groups mapped to slices
+  , stepsConsumed :: !Int           -- ^ Total VM steps executed to find this match
   } deriving (Eq, Show, Generic)
 
--- | Pausable and resumable execution continuation.
+-- | Pausable and resumable execution continuation captured when fuel is exhausted.
 data MatchContinuation s = MatchContinuation
-  { savedRegex       :: !Regex
-  , savedTarget      :: !s
-  , savedStartIndex  :: !Int
-  , currentThread    :: !ThreadState
-  , backtrackStack   :: ![ThreadState]
-  , currentSteps     :: !Int
+  { savedRegex       :: !Regex          -- ^ The compiled regex being evaluated
+  , savedTarget      :: !s              -- ^ The target sequence
+  , savedStartIndex  :: !Int            -- ^ Outer search loop start offset
+  , currentThread    :: !ThreadState    -- ^ Active thread state at suspension point
+  , backtrackStack   :: ![ThreadState]  -- ^ Pending alternative branches
+  , currentSteps     :: !Int            -- ^ Total steps executed up to suspension
   }
 
 -- | Verdict of a matching operation.
 data MatchStatus s
-  = Matched !(MatchResult s)
-  | NoMatch
-  | OutOfFuel !(MatchContinuation s)
+  = Matched !(MatchResult s)            -- ^ A match was successfully found
+  | NoMatch                             -- ^ The pattern does not match the target
+  | OutOfFuel !(MatchContinuation s)    -- ^ Fuel budget exhausted; resumable
 
 -- | Internal VM thread execution state.
 data ThreadState = ThreadState
-  { pc    :: !Int
-  , strIdx :: !Int
-  , saves  :: !(Map Int (Int, Maybe Int))
+  { pc     :: !Int                          -- ^ Program counter: index into program vector
+  , strIdx :: !Int                          -- ^ Current position in target character sequence
+  , saves  :: !(Map Int (Int, Maybe Int))   -- ^ Capture registers: group idx -> (start, optional end)
   } deriving (Eq, Show, Generic)
 
 -- | Execute regex search across a sequence starting from index 0.
 runMatch :: RegexTarget s => Regex -> s -> Fuel -> MatchStatus s
-runMatch regex target fuel = runMatchAt regex target 0 fuel
+runMatch regex target = runMatchAt regex target 0
 
--- | Execute regex search starting from a specific offset.
+-- | Execute regex search starting from a specific character offset.
 runMatchAt :: RegexTarget s => Regex -> s -> Int -> Fuel -> MatchStatus s
 runMatchAt regex target startIdx fuel =
   let len = seqLength target
@@ -79,7 +140,7 @@ runMatchAt regex target startIdx fuel =
 
 -- | Resume a previously suspended match with additional fuel.
 resumeMatch :: RegexTarget s => MatchContinuation s -> Fuel -> MatchStatus s
-resumeMatch cont fuel =
+resumeMatch cont =
   stepVM
     cont.savedRegex
     cont.savedTarget
@@ -87,7 +148,6 @@ resumeMatch cont fuel =
     cont.currentThread
     cont.backtrackStack
     cont.currentSteps
-    fuel
 
 -- | Find all non-overlapping matches across the target sequence.
 findAllMatches :: RegexTarget s => Regex -> s -> [MatchResult s]
@@ -102,6 +162,7 @@ findAllMatches regex target = go 0
           _ -> []
 
 -- | Core backtracking execution step loop.
+-- Evaluates one instruction and advances the thread or backtracks to an alternate branch.
 stepVM
   :: RegexTarget s
   => Regex
@@ -196,6 +257,7 @@ stepVM regex target startIdx th stack steps fuel =
              OpMatch ->
                Matched (buildResult regex target th (steps + 1))
 
+-- | Backtrack to next pending thread on stack, or advance outer search loop.
 backtrackOrNextStart
   :: RegexTarget s
   => Regex
@@ -225,6 +287,7 @@ backtrackOrNextStart regex target startIdx stack steps fuel =
              in stepVM regex target nextStart freshThread [] steps fuel
            else NoMatch
 
+-- | Construct a final 'MatchResult' from the terminating thread registers.
 buildResult :: RegexTarget s => Regex -> s -> ThreadState -> Int -> MatchResult s
 buildResult regex target th steps =
   let (mOff, mLen) = case Map.lookup 0 th.saves of
@@ -251,6 +314,7 @@ buildResult regex target th steps =
       , stepsConsumed = steps
       }
 
+-- | Test if a character satisfies a character class specification.
 matchClass :: CharClass -> Char -> Bool
 matchClass cls c = case cls of
   ClassAny -> c /= '\n'
@@ -267,6 +331,7 @@ matchClass cls c = case cls of
     inRange ch (RangeSingle s) = ch == s
     inRange ch (RangeBetween s e) = ch >= s && ch <= e
 
+-- | Assert if a boundary condition holds at a specific character position.
 matchAnchor :: RegexTarget s => Anchor -> Int -> s -> Bool
 matchAnchor anchor idx target = case anchor of
   AnchorStart -> idx == 0

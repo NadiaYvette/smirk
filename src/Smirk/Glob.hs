@@ -1,8 +1,25 @@
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 
+{- |
+Module      : Smirk.Glob
+Description : Native POSIX and Git-style globbing engine with compile-time QuasiQuoters
+Copyright   : (c) Nadia Yvette Chambers, 2026
+License     : Apache-2.0
+
+Implements native globbing and wildcard pattern compilation directly on top of
+Smirk's PCRE engine and AST compiler.
+
+=== Supported Glob Syntax
+
+* Single-level wildcards: @*@ matches any characters except directory separators (@/@).
+* Recursive path wildcards: @**@ matches across directory hierarchies.
+* Single-character wildcard: @?@ matches any single non-separator character.
+* Character ranges: @[a-z]@, @[0-9]@, with negation @[!a-z]@ or @[^a-z]@.
+* Alternation braces: @{src,test}/**/*.hs@.
+* Escape sequences: @\\*@, @\\?@, @\\[@, @\\{@.
+-}
 module Smirk.Glob
   ( -- * Glob Compilation & Matching
     compileGlob
@@ -16,6 +33,11 @@ module Smirk.Glob
 
     -- * Compile-time QuasiQuoter
   , glob
+
+    -- * Parser Combinators
+  , GlobParser
+  , pGlob
+  , pGlobItem
   ) where
 
 import Control.Monad (void)
@@ -41,6 +63,7 @@ data GlobOptions = GlobOptions
   } deriving (Eq, Show, Generic)
 
 -- | Standard filesystem glob configuration (POSIX/Git style).
+-- Enforces that '*' stops at '/' boundaries and '**' matches arbitrarily deep subdirectories.
 defaultGlobOptions :: GlobOptions
 defaultGlobOptions = GlobOptions
   { matchPathSeparators = True
@@ -48,15 +71,18 @@ defaultGlobOptions = GlobOptions
   }
 
 -- | Unconstrained wildcard configuration (for tool names, namespaces, e.g. "mcp__*").
+-- Allows '*' to match any character including directory separators.
 wildcardGlobOptions :: GlobOptions
 wildcardGlobOptions = GlobOptions
   { matchPathSeparators = False
   , caseSensitive       = True
   }
 
+-- | Megaparsec parser type for glob strings over strict Text.
 type GlobParser = Parsec Void Text
 
--- | Compile a filesystem glob pattern (e.g. "src/**/*.hs", "test/Spec?.hs").
+-- | Compile a filesystem glob pattern (e.g. "src/**/*.hs", "test/Spec?.hs")
+-- into an anchored Smirk 'Regex' using 'defaultGlobOptions'.
 compileGlob :: Text -> Either Text Regex
 compileGlob = compileGlobWithOptions defaultGlobOptions
 
@@ -64,7 +90,7 @@ compileGlob = compileGlobWithOptions defaultGlobOptions
 compileWildcard :: Text -> Either Text Regex
 compileWildcard = compileGlobWithOptions wildcardGlobOptions
 
--- | Compile a glob with custom 'GlobOptions'.
+-- | Compile a glob pattern with explicit 'GlobOptions'.
 compileGlobWithOptions :: GlobOptions -> Text -> Either Text Regex
 compileGlobWithOptions opts input = do
   ast <- globToAST opts input
@@ -74,7 +100,7 @@ compileGlobWithOptions opts input = do
 globToAST :: GlobOptions -> Text -> Either Text AST
 globToAST opts input =
   case runParser (pGlob opts) "glob" input of
-    Left err -> Left (T.pack $ errorBundlePretty err)
+    Left err  -> Left (T.pack $ errorBundlePretty err)
     Right ast -> Right ast
 
 -- | Test if a target sequence matches a compiled glob regex.
@@ -84,12 +110,14 @@ matchGlob regex target =
     Matched _ -> True
     _         -> False
 
+-- | Top-level glob parser wrapping items between start and end anchors.
 pGlob :: GlobOptions -> GlobParser AST
 pGlob opts = do
   items <- many (pGlobItem opts)
   eof
-  pure $ Seq ([AnchorAssert AnchorStart] ++ items ++ [AnchorAssert AnchorEnd])
+  pure $ Seq (AnchorAssert AnchorStart : items ++ [AnchorAssert AnchorEnd])
 
+-- | Parse individual glob items: recursive wildcards, single wildcards, braces, classes, escapes.
 pGlobItem :: GlobOptions -> GlobParser AST
 pGlobItem opts =
   pSlashDoubleStarSlash opts
@@ -101,17 +129,18 @@ pGlobItem opts =
   <|> pEscapedChar
   <|> pLiteralChar
 
+-- | Parse '/**/' representing zero or more directory levels.
 pSlashDoubleStarSlash :: GlobOptions -> GlobParser AST
 pSlashDoubleStarSlash opts
   | opts.matchPathSeparators = try $ do
       void (string "/**/")
-      -- Matches "/" or "/.../"
       pure $ Alt
         [ Lit '/'
         , Seq [Lit '/', Repeat 0 Nothing RepGreedy (Class ClassAny), Lit '/']
         ]
   | otherwise = empty
 
+-- | Parse '**/' or terminal '**' recursive wildcard.
 pDoubleStar :: GlobOptions -> GlobParser AST
 pDoubleStar opts
   | opts.matchPathSeparators = try $ do
@@ -123,6 +152,7 @@ pDoubleStar opts
       <|> (string "**" >> pure (Repeat 0 Nothing RepGreedy (Class ClassAny)))
   | otherwise = string "**" >> pure (Repeat 0 Nothing RepGreedy (Class ClassAny))
 
+-- | Parse single-level '*' wildcard matching within directory boundaries.
 pSingleStar :: GlobOptions -> GlobParser AST
 pSingleStar opts
   | opts.matchPathSeparators =
@@ -130,6 +160,7 @@ pSingleStar opts
   | otherwise =
       char '*' >> pure (Repeat 0 Nothing RepGreedy (Class ClassAny))
 
+-- | Parse '?' matching any single character except directory separator.
 pQuestionMark :: GlobOptions -> GlobParser AST
 pQuestionMark opts
   | opts.matchPathSeparators =
@@ -137,11 +168,13 @@ pQuestionMark opts
   | otherwise =
       char '?' >> pure (Class ClassAny)
 
+-- | Parse brace expansion '{a,b,c}' into an alternation.
 pBraceExpansion :: GlobOptions -> GlobParser AST
 pBraceExpansion opts = between (char '{') (char '}') $ do
   branches <- sepBy1 (many (pBraceInnerItem opts)) (char ',')
   pure $ Alt (map Seq branches)
 
+-- | Parse inner items within a brace expansion.
 pBraceInnerItem :: GlobOptions -> GlobParser AST
 pBraceInnerItem opts =
   pSlashDoubleStarSlash opts
@@ -154,6 +187,7 @@ pBraceInnerItem opts =
   <|> (char '/' >> pure (Lit '/'))
   <|> (char ';' >> pure (Lit ';'))
 
+-- | Parse character classes with optional negation: '[a-z]', '[!0-9]', '[^A-Z]'.
 pCharClass :: GlobParser AST
 pCharClass = between (char '[') (char ']') $ do
   negated <- (char '!' >> pure True) <|> (char '^' >> pure True) <|> pure False
@@ -168,12 +202,13 @@ pCharClass = between (char '[') (char ']') $ do
       pure $ RangeBetween s e
     pSingle = RangeSingle <$> noneOf [']']
 
+-- | Parse an escaped character: '\*', '\?', etc.
 pEscapedChar :: GlobParser AST
 pEscapedChar = do
   void (char '\\')
-  c <- anySingle
-  pure (Lit c)
+  Lit <$> anySingle
 
+-- | Parse literal characters that do not carry special glob syntax meaning.
 pLiteralChar :: GlobParser AST
 pLiteralChar =
   (Lit <$> noneOf ("*?{}[],;/\\" :: String))
@@ -183,7 +218,8 @@ pLiteralChar =
 
 -- | QuasiQuoter for compile-time verified glob patterns.
 --
--- Example:
+-- === Example
+--
 -- @
 -- let r = [glob|src\/**\/*.hs|]
 -- matchGlob r "src/Smirk/Core/AST.hs" == True
@@ -196,11 +232,12 @@ glob = QuasiQuoter
   , quoteDec  = error "Smirk.glob: Declaration quasiquote not supported"
   }
 
+-- | Compile-time expression quoter for glob strings.
 quoteGlobExp :: String -> Q Exp
 quoteGlobExp globStr =
   case compileGlob (T.pack globStr) of
     Left err -> fail ("Smirk glob compile error: " <> T.unpack err)
-    Right _ ->
+    Right _  ->
       [| case compileGlob (T.pack $(stringE globStr)) of
            Right r -> r
            Left e  -> error ("Smirk glob internal error: " <> T.unpack e)

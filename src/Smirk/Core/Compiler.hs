@@ -1,5 +1,14 @@
-{-# LANGUAGE OverloadedStrings #-}
+{- |
+Module      : Smirk.Core.Compiler
+Description : AST to Bytecode compilation with jump resolution and capture group indexing
+Copyright   : (c) Nadia Yvette Chambers, 2026
+License     : Apache-2.0
 
+Compiles the high-level PCRE 'AST' into a flat vector of bytecode instructions
+('Opcode') ready for execution by the Pike VM. Resolves relative jump offsets,
+generates nondeterministic thread branches for repetitions and alternations,
+and assigns sequential 1-based indices to named and unnamed capture groups.
+-}
 module Smirk.Core.Compiler
   ( compileAST
   , compileToRegex
@@ -14,11 +23,13 @@ import qualified Data.Vector as V
 import Smirk.Core.AST
 import Smirk.Core.Bytecode
 
--- | Compile an AST into a high-level 'Regex' record.
+-- | Compile an AST into a high-level 'Regex' record ready for execution.
+-- Wraps the program in top-level capture group 0 (@OpSaveStart 0@ / @OpSaveEnd 0@)
+-- and terminates with @OpMatch@.
 compileToRegex :: Text -> AST -> Regex
 compileToRegex patternStr rawAST =
   let (numberedAST, groupMap, maxIdx) = assignGroupIndices rawAST
-      progOps = [OpSaveStart 0] ++ compileAST numberedAST ++ [OpSaveEnd 0, OpMatch]
+      progOps = OpSaveStart 0 : compileAST numberedAST ++ [OpSaveEnd 0, OpMatch]
   in Regex
       { originalPattern = patternStr
       , program         = V.fromList progOps
@@ -27,6 +38,8 @@ compileToRegex patternStr rawAST =
       }
 
 -- | Sequentially assign 1-based capture group indices in left-to-right order.
+-- Returns the modified AST with assigned group indices, the name-to-index map,
+-- and the maximum allocated index.
 assignGroupIndices :: AST -> (AST, Map Text Int, Int)
 assignGroupIndices rootAST =
   let (ast', (finalIdx, groupMap)) = go rootAST (1, Map.empty)
@@ -64,7 +77,7 @@ assignGroupIndices rootAST =
         in (Lookaround dir isPos inner', st')
       other -> (other, (nextIdx, m))
 
--- | Compile AST node to a flat list of opcodes with relative jump resolution.
+-- | Compile an AST node to a flat list of opcodes with relative jump resolution.
 compileAST :: AST -> [Opcode]
 compileAST = \case
   Empty -> []
@@ -74,7 +87,7 @@ compileAST = \case
   Seq items -> concatMap compileAST items
   Alt branches -> compileAlt branches
   Repeat minN mMax kind inner -> compileRepeat minN mMax kind inner
-  Group _ (Just idx) inner -> [OpSaveStart idx] ++ compileAST inner ++ [OpSaveEnd idx]
+  Group _ (Just idx) inner -> OpSaveStart idx : compileAST inner ++ [OpSaveEnd idx]
   Group _ Nothing inner -> compileAST inner
   NonCapturing inner -> compileAST inner
   Lookaround Lookahead isPos inner ->
@@ -96,26 +109,26 @@ compileAlt (b1 : bs) =
       len2 = length code2
       splitOp = OpSplit 1 (1 + len1 + 1)
       jumpToEnd = OpJump (len2 + 1)
-  in [splitOp] ++ code1 ++ [jumpToEnd] ++ code2
+  in splitOp : code1 ++ jumpToEnd : code2
 
 compileRepeat :: Int -> Maybe Int -> RepKind -> AST -> [Opcode]
 compileRepeat 0 (Just 1) RepGreedy inner =
   let body = compileAST inner
       len = length body
-  in [OpSplit 1 (len + 1)] ++ body
+  in OpSplit 1 (len + 1) : body
 compileRepeat 0 (Just 1) RepLazy inner =
   let body = compileAST inner
       len = length body
-  in [OpSplit (len + 1) 1] ++ body
+  in OpSplit (len + 1) 1 : body
 compileRepeat 0 Nothing RepGreedy inner =
   let body = compileAST inner
       len = length body
-      loop = [OpSplit 1 (len + 2)] ++ body ++ [OpJump (- (len + 1))]
+      loop = OpSplit 1 (len + 2) : body ++ [OpJump (- (len + 1))]
   in loop
 compileRepeat 0 Nothing RepLazy inner =
   let body = compileAST inner
       len = length body
-      loop = [OpSplit (len + 2) 1] ++ body ++ [OpJump (- (len + 1))]
+      loop = OpSplit (len + 2) 1 : body ++ [OpJump (- (len + 1))]
   in loop
 compileRepeat 1 Nothing RepGreedy inner =
   let body = compileAST inner

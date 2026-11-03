@@ -1,5 +1,31 @@
-{-# LANGUAGE OverloadedStrings #-}
+{- |
+Module      : Smirk
+Description : Pure, effectful, resumable, step-budgeted PCRE interpreter for Haskell
+Copyright   : (c) Nadia Yvette Chambers, 2026
+License     : Apache-2.0
 
+@Smirk@ (;-P / ;-) is a pure, native Haskell PCRE regular expression engine
+featuring step-bounded execution (ReDoS defense), pausable/resumable matching,
+and @mono-traversable@ sequence polymorphism.
+
+=== Key Architectural Pillars
+
+1. __Step-Bounded Execution & ReDoS Defense:__ Every pattern evaluation can be
+   constrained by a discrete 'Fuel' step budget ('Limit' or 'Unlimited'). If thread
+   state evaluations exceed the threshold, evaluation halts safely and yields
+   'OutOfFuel' along with a resumable 'MatchContinuation'.
+
+2. __Sequence Polymorphism:__ Pattern matching operates uniformly across any
+   data type implementing 'RegexTarget', including strict 'Text', 'ByteString',
+   'String', @Seq Char@, and @Vector Char@.
+
+3. __Compile-Time QuasiQuoters:__ Static pattern validation via '[re|...|]',
+   stream editor substitution via '[ed|s/find/replace/g|]', and shell/glob
+   matching via '[glob|...|]'.
+
+4. __Modular Effect Handlers:__ Algebraic effect bindings for both @effectful@
+   (@smirk-effectful@) and @polysemy@ (@smirk-polysemy@).
+-}
 module Smirk
   ( -- * Core Types & API
     Regex (..)
@@ -60,6 +86,7 @@ import Smirk.Engine.VM
 import Smirk.Glob
 
 -- | Compile a PCRE regular expression string into a runnable 'Regex'.
+-- Returns a parse error description as 'Left' on failure.
 compileRegex :: Text -> Either Text Regex
 compileRegex = compileRegexWithFlags defaultFlags
 
@@ -70,6 +97,7 @@ compileRegexWithFlags flags input = do
   pure (compileToRegex input ast)
 
 -- | Test if a target sequence matches a regular expression.
+-- Returns 'True' if a match is found anywhere in the target sequence.
 testMatch :: RegexTarget s => Regex -> s -> Bool
 testMatch reg target = case runMatch reg target Unlimited of
   Matched _ -> True
@@ -82,5 +110,6 @@ execMatch reg target = case runMatch reg target Unlimited of
   _           -> Nothing
 
 -- | Execute regex search bounded by a specific step budget.
+-- Returns 'OutOfFuel' with a continuation if the step threshold is exceeded.
 execMatchWithFuel :: RegexTarget s => Regex -> s -> Fuel -> MatchStatus s
 execMatchWithFuel = runMatch

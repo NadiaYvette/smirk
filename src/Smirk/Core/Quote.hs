@@ -1,9 +1,23 @@
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 
+{- |
+Module      : Smirk.Core.Quote
+Description : Compile-time QuasiQuoters for PCRE expressions and search-and-replace editors
+Copyright   : (c) Nadia Yvette Chambers, 2026
+License     : Apache-2.0
+
+Provides Template Haskell QuasiQuoters that validate regular expressions and
+stream-editor replacement templates at compile time, eliminating runtime parse
+failures and overhead.
+
+=== Available QuasiQuoters
+
+* '[re|...|]': Compile-time validated PCRE regular expressions.
+* '[ed|search///replace|]': Compile-time validated sed-style stream editor.
+-}
 module Smirk.Core.Quote
   ( -- * QuasiQuoters
     re
@@ -30,8 +44,10 @@ import Smirk.Engine.Sequence (RegexTarget (..))
 import Smirk.Engine.VM (MatchResult (..), findAllMatches)
 
 -- | QuasiQuoter for compile-time verified PCRE regular expressions.
+-- Rejects invalid PCRE patterns at compile time with descriptive syntax errors.
 --
--- Example:
+-- === Example
+--
 -- @
 -- let r = [re|(?<protocol>https?)://(?<domain>[a-z.]+)|]
 -- @
@@ -43,28 +59,30 @@ re = QuasiQuoter
   , quoteDec  = error "Smirk.re: Declaration quasiquote not supported"
   }
 
+-- | Compile-time expression quoter for regex patterns.
 quoteRegexExp :: String -> Q Exp
 quoteRegexExp patternStr =
   case parsePCRE (T.pack patternStr) of
     Left err -> fail ("Smirk regex compile error: " <> T.unpack err)
-    Right _ ->
+    Right _  ->
       [| case parsePCRE (T.pack $(stringE patternStr)) of
            Right ast -> compileToRegex (T.pack $(stringE patternStr)) ast
            Left e    -> error ("Smirk regex internal error: " <> T.unpack e)
        |]
 
--- | Structured find-and-replace editor.
+-- | Structured find-and-replace editor record.
 data Editor s = Editor
-  { editRegex       :: !Regex
-  , editReplacement :: !Text
-  , editGlobal      :: !Bool
+  { editRegex       :: !Regex   -- ^ Compiled search regular expression
+  , editReplacement :: !Text    -- ^ Replacement template string
+  , editGlobal      :: !Bool    -- ^ If True, replace all non-overlapping occurrences; if False, first only
   } deriving (Eq, Show, Generic)
 
 -- | QuasiQuoter for compile-time verified search-and-replace editors using @///@ delimiters.
 --
--- Format: @[ed|search_pattern///replacement_string|]@
+-- Format: @[ed|search_pattern///replacement_string|]@ or @[ed|search///replace///1|]@ (for single replacement).
 --
--- Example:
+-- === Example
+--
 -- @
 -- let edScript = [ed|foo([0-9]+)///bar${1}|]
 -- applyEditor edScript "foo42" == "bar42"
@@ -77,6 +95,7 @@ ed = QuasiQuoter
   , quoteDec  = error "Smirk.ed: Declaration quasiquote not supported"
   }
 
+-- | Compile-time expression quoter for search-and-replace editor templates.
 quoteEditorExp :: String -> Q Exp
 quoteEditorExp rawStr =
   case T.splitOn "///" (T.pack rawStr) of
@@ -90,7 +109,7 @@ quoteEditorExp rawStr =
     validateAndBuild searchPat replaceStr isGlobal =
       case parsePCRE searchPat of
         Left err -> fail ("Smirk editor search regex error: " <> T.unpack err)
-        Right _ ->
+        Right _  ->
           [| Editor
                { editRegex = case parsePCRE (T.pack $(stringE (T.unpack searchPat))) of
                    Right ast -> compileToRegex (T.pack $(stringE (T.unpack searchPat))) ast
@@ -101,6 +120,7 @@ quoteEditorExp rawStr =
            |]
 
 -- | Apply an 'Editor' transformation to a target sequence.
+-- Finds matching slices and substitutes them according to the replacement template.
 applyEditor :: RegexTarget s => Editor s -> s -> s
 applyEditor editor target =
   let matches = findAllMatches editor.editRegex target
@@ -111,6 +131,7 @@ applyEditor editor target =
          let pieces = reconstructSlices target 0 selectedMatches editor.editReplacement
          in seqFromText (T.concat pieces)
 
+-- | Reconstruct a sequence by interleaving untouched slices with substituted replacements.
 reconstructSlices :: RegexTarget s => s -> Int -> [MatchResult s] -> Text -> [Text]
 reconstructSlices target curIdx [] _ =
   let remLen = seqLength target - curIdx
@@ -124,7 +145,7 @@ reconstructSlices target curIdx (m : ms) replTemplate =
 
 -- | Expand capture group variables (${1}, ${name}, \1, $0, $&) in a replacement template.
 replaceMatch :: RegexTarget s => MatchResult s -> Text -> Text
-replaceMatch res template = go template
+replaceMatch res = go
   where
     go txt
       | T.null txt = ""
@@ -149,9 +170,5 @@ replaceMatch res template = go template
                else chunk <> go rest
 
     lookupVar str = case reads str :: [(Int, String)] of
-      [(idx, "")] -> case Map.lookup idx res.captureGroups of
-        Just cap -> seqToText cap
-        Nothing  -> ""
-      _ -> case Map.lookup (T.pack str) res.namedGroups of
-        Just cap -> seqToText cap
-        Nothing  -> ""
+      [(idx, "")] -> maybe "" seqToText (Map.lookup idx res.captureGroups)
+      _           -> maybe "" seqToText (Map.lookup (T.pack str) res.namedGroups)

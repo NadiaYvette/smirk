@@ -8,11 +8,22 @@ description:
     This package depends on the plain 'smirk' package for the core engine, so
     consumers who only need effectful (not polysemy) do not drag in polysemy.
 license:            Apache-2.0
+license-file:       LICENSE
 author:             Nadia Yvette Chambers
 maintainer:         Nadia Chambers <nadia.yvette.chambers@ik.me>
+homepage:           https://github.com/NadiaYvette/smirk
+bug-reports:        https://github.com/NadiaYvette/smirk/issues
 category:           Text, Regex, Effects
 build-type:         Simple
-extra-doc-files:    ../README.md
+extra-doc-files:
+    README.md
+  , CHANGELOG.md
+  , LICENSE
+
+source-repository head
+    type:     git
+    location: https://github.com/NadiaYvette/smirk.git
+    subdir:   effectful
 
 common common-options
     default-language:   GHC2021
@@ -53,8 +64,8 @@ library
         effectful >= 2.0 && < 3,
         effectful-core >= 2.0 && < 3,
         effectful-th >= 1.0 && < 2,
-        smirk,
-        text >= 2.0
+        smirk >= 0.1 && < 0.2,
+        text >= 2.0 && < 3
 
 test-suite smirk-effectful-test
     import:             common-options
@@ -62,9 +73,9 @@ test-suite smirk-effectful-test
     hs-source-dirs:     test
     main-is:            Spec.hs
     build-depends:
-        base,
-        effectful,
-        hspec,
-        smirk,
+        base >= 4.16 && < 5,
+        effectful >= 2.0 && < 3,
+        hspec >= 2.10 && < 3,
+        smirk >= 0.1 && < 0.2,
         smirk-effectful,
-        text
+        text >= 2.0 && < 3

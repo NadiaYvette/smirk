@@ -8,11 +8,21 @@ description:
     dual algebraic effect interpreters (effectful & polysemy), and mono-traversable
     sequence polymorphism (Text, ByteString, Seq, Vector, NonEmpty).
 license:            Apache-2.0
+license-file:       LICENSE
 author:             Nadia Yvette Chambers
 maintainer:         Nadia Chambers <nadia.yvette.chambers@ik.me>
+homepage:           https://github.com/NadiaYvette/smirk
+bug-reports:        https://github.com/NadiaYvette/smirk/issues
 category:           Text, Regex, Effects
 build-type:         Simple
-extra-doc-files:    README.md
+extra-doc-files:
+    README.md
+  , CHANGELOG.md
+  , LICENSE
+
+source-repository head
+    type:     git
+    location: https://github.com/NadiaYvette/smirk.git
 
 common common-options
     default-language:   GHC2021
@@ -58,14 +68,14 @@ library
         Smirk.Glob
     build-depends:
         base >= 4.16 && < 5,
-        containers,
-        bytestring,
-        megaparsec >= 9.0,
-        mono-traversable,
-        parser-combinators,
-        template-haskell,
-        text >= 2.0,
-        vector
+        containers >= 0.6 && < 1,
+        bytestring >= 0.11 && < 1,
+        megaparsec >= 9.0 && < 10,
+        mono-traversable >= 1.0 && < 2,
+        parser-combinators >= 1.3 && < 2,
+        template-haskell >= 2.18 && < 3,
+        text >= 2.0 && < 3,
+        vector >= 0.12 && < 1
 
 test-suite smirk-test
     import:             common-options
@@ -79,10 +89,10 @@ test-suite smirk-test
         QuoteSpec
         GlobSpec
     build-depends:
-        base,
-        bytestring,
-        containers,
-        hspec,
+        base >= 4.16 && < 5,
+        bytestring >= 0.11 && < 1,
+        containers >= 0.6 && < 1,
+        hspec >= 2.10 && < 3,
         smirk,
-        text,
-        vector
+        text >= 2.0 && < 3,
+        vector >= 0.12 && < 1
