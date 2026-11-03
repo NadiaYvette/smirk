@@ -23,7 +23,7 @@ import qualified Data.Vector as V
 import Smirk.Core.AST
 import Smirk.Core.Bytecode
 
--- | Compile an AST into a high-level 'Regex' record ready for execution.
+-- | Compile an AST into a high-level 't:Regex' record ready for execution.
 -- Wraps the program in top-level capture group 0 (@OpSaveStart 0@ / @OpSaveEnd 0@)
 -- and terminates with @OpMatch@.
 compileToRegex :: Text -> AST -> Regex

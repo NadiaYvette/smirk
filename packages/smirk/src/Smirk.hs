@@ -11,20 +11,20 @@ and @mono-traversable@ sequence polymorphism.
 === Key Architectural Pillars
 
 1. __Step-Bounded Execution & ReDoS Defense:__ Every pattern evaluation can be
-   constrained by a discrete 'Fuel' step budget ('Limit' or 'Unlimited'). If thread
+   constrained by a discrete 'Fuel' step budget ('StepBudget' or 'Unlimited'). If thread
    state evaluations exceed the threshold, evaluation halts safely and yields
-   'OutOfFuel' along with a resumable 'MatchContinuation'.
+   'OutOfFuel' along with a resumable 't:MatchContinuation'.
 
 2. __Sequence Polymorphism:__ Pattern matching operates uniformly across any
-   data type implementing 'RegexTarget', including strict 'Text', 'ByteString',
+   data type implementing 'RegexTarget', including strict 'Text', @ByteString@,
    'String', @Seq Char@, and @Vector Char@.
 
-3. __Compile-Time QuasiQuoters:__ Static pattern validation via '[re|...|]',
-   stream editor substitution via '[ed|s/find/replace/g|]', and shell/glob
-   matching via '[glob|...|]'.
+3. __Compile-Time QuasiQuoters:__ Static pattern validation via @[re|...|]@,
+   stream editor substitution via @[ed|s/find/replace/g|]@, and shell/glob
+   matching via @[glob|...|]@.
 
-4. __Modular Effect Handlers:__ Algebraic effect bindings for both @effectful@
-   (@smirk-effectful@) and @polysemy@ (@smirk-polysemy@).
+4. __Modular Effect Handlers:__ Algebraic effect bindings for @effectful@
+   (@smirk-effectful@), @polysemy@ (@smirk-polysemy@), and @penelope@ (@smirk-penelope@).
 -}
 module Smirk
   ( -- * Core Types & API
@@ -85,12 +85,12 @@ import Smirk.Engine.Sequence
 import Smirk.Engine.VM
 import Smirk.Glob
 
--- | Compile a PCRE regular expression string into a runnable 'Regex'.
+-- | Compile a PCRE regular expression string into a runnable 't:Regex'.
 -- Returns a parse error description as 'Left' on failure.
 compileRegex :: Text -> Either Text Regex
 compileRegex = compileRegexWithFlags defaultFlags
 
--- | Compile a PCRE regular expression string with explicit compilation 'Flags'.
+-- | Compile a PCRE regular expression string with explicit compilation 't:Flags'.
 compileRegexWithFlags :: Flags -> Text -> Either Text Regex
 compileRegexWithFlags flags input = do
   ast <- parsePCREWithFlags flags input
@@ -103,7 +103,7 @@ testMatch reg target = case runMatch reg target Unlimited of
   Matched _ -> True
   _         -> False
 
--- | Execute regex search returning the first 'MatchResult', if any.
+-- | Execute regex search returning the first 't:MatchResult', if any.
 execMatch :: RegexTarget s => Regex -> s -> Maybe (MatchResult s)
 execMatch reg target = case runMatch reg target Unlimited of
   Matched res -> Just res

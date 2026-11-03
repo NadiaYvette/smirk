@@ -119,7 +119,7 @@ quoteEditorExp rawStr =
                }
            |]
 
--- | Apply an 'Editor' transformation to a target sequence.
+-- | Apply an 't:Editor' transformation to a target sequence.
 -- Finds matching slices and substitutes them according to the replacement template.
 applyEditor :: RegexTarget s => Editor s -> s -> s
 applyEditor editor target =

@@ -90,7 +90,7 @@ compileGlob = compileGlobWithOptions defaultGlobOptions
 compileWildcard :: Text -> Either Text Regex
 compileWildcard = compileGlobWithOptions wildcardGlobOptions
 
--- | Compile a glob pattern with explicit 'GlobOptions'.
+-- | Compile a glob pattern with explicit 't:GlobOptions'.
 compileGlobWithOptions :: GlobOptions -> Text -> Either Text Regex
 compileGlobWithOptions opts input = do
   ast <- globToAST opts input
@@ -129,7 +129,7 @@ pGlobItem opts =
   <|> pEscapedChar
   <|> pLiteralChar
 
--- | Parse '/**/' representing zero or more directory levels.
+-- | Parse @/**/@ representing zero or more directory levels.
 pSlashDoubleStarSlash :: GlobOptions -> GlobParser AST
 pSlashDoubleStarSlash opts
   | opts.matchPathSeparators = try $ do
@@ -140,7 +140,7 @@ pSlashDoubleStarSlash opts
         ]
   | otherwise = empty
 
--- | Parse '**/' or terminal '**' recursive wildcard.
+-- | Parse @**/@ or terminal @**@ recursive wildcard.
 pDoubleStar :: GlobOptions -> GlobParser AST
 pDoubleStar opts
   | opts.matchPathSeparators = try $ do
@@ -152,7 +152,7 @@ pDoubleStar opts
       <|> (string "**" >> pure (Repeat 0 Nothing RepGreedy (Class ClassAny)))
   | otherwise = string "**" >> pure (Repeat 0 Nothing RepGreedy (Class ClassAny))
 
--- | Parse single-level '*' wildcard matching within directory boundaries.
+-- | Parse single-level @*@ wildcard matching within directory boundaries.
 pSingleStar :: GlobOptions -> GlobParser AST
 pSingleStar opts
   | opts.matchPathSeparators =
@@ -160,7 +160,7 @@ pSingleStar opts
   | otherwise =
       char '*' >> pure (Repeat 0 Nothing RepGreedy (Class ClassAny))
 
--- | Parse '?' matching any single character except directory separator.
+-- | Parse @?@ matching any single character except directory separator.
 pQuestionMark :: GlobOptions -> GlobParser AST
 pQuestionMark opts
   | opts.matchPathSeparators =
@@ -168,7 +168,7 @@ pQuestionMark opts
   | otherwise =
       char '?' >> pure (Class ClassAny)
 
--- | Parse brace expansion '{a,b,c}' into an alternation.
+-- | Parse brace expansion @{a,b,c}@ into an alternation.
 pBraceExpansion :: GlobOptions -> GlobParser AST
 pBraceExpansion opts = between (char '{') (char '}') $ do
   branches <- sepBy1 (many (pBraceInnerItem opts)) (char ',')
@@ -187,7 +187,7 @@ pBraceInnerItem opts =
   <|> (char '/' >> pure (Lit '/'))
   <|> (char ';' >> pure (Lit ';'))
 
--- | Parse character classes with optional negation: '[a-z]', '[!0-9]', '[^A-Z]'.
+-- | Parse character classes with optional negation: @[a-z]@, @[!0-9]@, @[^A-Z]@.
 pCharClass :: GlobParser AST
 pCharClass = between (char '[') (char ']') $ do
   negated <- (char '!' >> pure True) <|> (char '^' >> pure True) <|> pure False
@@ -202,7 +202,7 @@ pCharClass = between (char '[') (char ']') $ do
       pure $ RangeBetween s e
     pSingle = RangeSingle <$> noneOf [']']
 
--- | Parse an escaped character: '\*', '\?', etc.
+-- | Parse an escaped character: @\\*@, @\\?@, etc.
 pEscapedChar :: GlobParser AST
 pEscapedChar = do
   void (char '\\')

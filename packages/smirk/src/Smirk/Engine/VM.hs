@@ -14,7 +14,7 @@ nondeterministic state machine with an explicit backtracking continuation stack.
 
 * __ReDoS Immunity via Step-Bounding:__ Every instruction transition increments
   the consumed step counter. When running under 'StepBudget', exceeding the limit
-  immediately yields 'OutOfFuel' with an intact 'MatchContinuation', completely
+  immediately yields 'OutOfFuel' with an intact 't:MatchContinuation', completely
   preventing algorithmic complexity attacks.
 * __Pausable & Resumable Continuation:__ Suspended computations retain the entire
   thread state, backtrack stack, and program counters, enabling interactive or
@@ -287,7 +287,7 @@ backtrackOrNextStart regex target startIdx stack steps fuel =
              in stepVM regex target nextStart freshThread [] steps fuel
            else NoMatch
 
--- | Construct a final 'MatchResult' from the terminating thread registers.
+-- | Construct a final 't:MatchResult' from the terminating thread registers.
 buildResult :: RegexTarget s => Regex -> s -> ThreadState -> Int -> MatchResult s
 buildResult regex target th steps =
   let (mOff, mLen) = case Map.lookup 0 th.saves of

@@ -11,10 +11,10 @@ Expressions (PCRE) using Megaparsec.
 
 === Operator Precedence Hierarchy
 
-1. __Alternation ('pAlternation'):__ Lowest precedence; separated by '|'.
+1. __Alternation ('pAlternation'):__ Lowest precedence; separated by @|@.
 2. __Concatenation ('pSequence'):__ Sequential concatenation of terms.
-3. __Repetition ('pRepeatItem'):__ Suffix quantifiers: '*', '+', '?', '{m,n}',
-   with optional greediness modifiers ('?' for lazy, '+' for possessive).
+3. __Repetition ('pRepeatItem'):__ Suffix quantifiers: @*@, @+@, @?@, @{m,n}@,
+   with optional greediness modifiers (@?@ for lazy, @+@ for possessive).
 4. __Atoms ('pAtom'):__ Groups, character classes, anchors, backreferences,
    escaped characters, and character literals.
 -}
@@ -59,7 +59,7 @@ type Parser = Parsec Void Text
 type ParserError = ParseErrorBundle Text Void
 
 -- | Parse a PCRE regular expression string using default compilation flags.
--- Returns 'Right AST' on success, or 'Left errorMessage' on failure.
+-- Returns 'Right' 'AST' on success, or 'Left' errorMessage on failure.
 parsePCRE :: Text -> Either Text AST
 parsePCRE = parsePCREWithFlags defaultFlags
 
@@ -103,8 +103,8 @@ pRepeatItem = do
     Nothing                 -> atom
     Just (minN, maxN, kind) -> Repeat minN maxN kind atom
 
--- | Parse repetition quantifiers: '*', '+', '?', or range '{min,max}',
--- accompanied by an optional greediness modifier ('?' for lazy, '+' for possessive).
+-- | Parse repetition quantifiers: @*@, @+@, @?@, or range @{min,max}@,
+-- accompanied by an optional greediness modifier (@?@ for lazy, @+@ for possessive).
 pRepetition :: Parser (Int, Maybe Int, RepKind)
 pRepetition = do
   (minN, maxN) <- pRepRange
@@ -145,11 +145,11 @@ pAtom =
   <|> pEscaped
   <|> pLiteral
 
--- | Parse '.' matching any character (subject to dotAll flag).
+-- | Parse @.@ matching any character (subject to dotAll flag).
 pDot :: Parser AST
 pDot = char '.' >> pure (Class ClassAny)
 
--- | Parse zero-width position anchors: '^', '$', '\b', '\B'.
+-- | Parse zero-width position anchors: @^@, @$@, @\\b@, @\\B@.
 pAnchor :: Parser AST
 pAnchor =
   (char '^' >> pure (AnchorAssert AnchorStart))
@@ -171,7 +171,7 @@ pGroup = between (char '(') (char ')') $ do
         <|> (string "<!" >> (Lookaround Lookbehind False <$> pAlternation))
         <|> pNamedGroup
 
--- | Parse a named capture group: '(?<name>pattern)'.
+-- | Parse a named capture group: @(?<name>pattern)@.
 pNamedGroup :: Parser AST
 pNamedGroup = do
   void (char '<')
@@ -179,14 +179,14 @@ pNamedGroup = do
   void (char '>')
   Group (Just name) Nothing <$> pAlternation
 
--- | Parse a bracketed character set: '[abc]', '[a-z0-9]', or negated '[^a-z]'.
+-- | Parse a bracketed character set: @[abc]@, @[a-z0-9]@, or negated @[^a-z]@.
 pClassSet :: Parser AST
 pClassSet = between (char '[') (char ']') $ do
   negated <- (char '^' >> pure True) <|> pure False
   ranges <- many pRangeItem
   pure $ Class (ClassSet ranges negated)
 
--- | Parse a character range within a set: either 'a-z' or a single character 'a'.
+-- | Parse a character range within a set: either @a-z@ or a single character @a@.
 pRangeItem :: Parser CharRange
 pRangeItem = try pBetweenRange <|> pSingleChar
   where
@@ -197,7 +197,7 @@ pRangeItem = try pBetweenRange <|> pSingleChar
       pure $ RangeBetween startC endC
     pSingleChar = RangeSingle <$> noneOf [']']
 
--- | Parse a numbered backreference: '\1', '\2', etc.
+-- | Parse a numbered backreference: @\\1@, @\\2@, etc.
 pBackRef :: Parser AST
 pBackRef = try $ do
   void (char '\\')

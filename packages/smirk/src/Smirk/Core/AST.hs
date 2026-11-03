@@ -42,8 +42,8 @@ defaultFlags = Flags
 
 -- | Character range within a character set ([a-z], [0-9]).
 data CharRange
-  = RangeSingle !Char          -- ^ Single character: 'a'
-  | RangeBetween !Char !Char   -- ^ Inclusive character range: 'a' to 'z'
+  = RangeSingle !Char          -- ^ Single character: @a@
+  | RangeBetween !Char !Char   -- ^ Inclusive character range: @a@ to @z@
   deriving (Eq, Show, Generic)
 
 -- | Character classes and custom character sets.

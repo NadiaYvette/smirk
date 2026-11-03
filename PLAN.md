@@ -36,6 +36,12 @@
   - Verified `cabal check` passes with 0 errors and 0 warnings across all 3 packages.
   - Passed all 5 physical verification gates in `./bin/smirk-verify`.
 
+- [x] **Milestone 1.6: Cellarius Constellation Restructuring & Penelope Effect Façade**
+  - Restructured packages into `packages/` layout conforming to Cellarius project constellation standards (`packages/smirk`, `packages/smirk-effectful`, `packages/smirk-polysemy`, `packages/smirk-penelope`).
+  - Implemented `smirk-penelope` providing first-class algebraic effect `RegexEngine`, smart operations, zero-cost row-vector handlers, and pure/monadic runners.
+  - Completely eliminated all Haddock documentation warnings across all four packages (100% coverage, 0 warnings).
+  - Cleaned all build and HLint warnings, verified 0 errors / 0 warnings on `cabal check` across all packages.
+
 ---
 
 ## Phase 2: Performance Profiling & Optimization [UPCOMING]

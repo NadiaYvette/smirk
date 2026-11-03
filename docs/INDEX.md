@@ -20,9 +20,10 @@ Welcome to the `smirk` technical documentation corpus.
 | **Commit Attribution** | [`docs/notes/COMMIT_ATTRIBUTION.md`](notes/COMMIT_ATTRIBUTION.md) | Git & DCO Policy | Contributors, Subagents | Procedural Authority | Current |
 | **AI Assistant Rules** | [`AGENTS.md`](../AGENTS.md) | Machine Instructions | AI Coding Assistants | Operational Mandate | Current |
 | **Engineering Plan** | [`PLAN.md`](../PLAN.md) | Strategic Roadmap | Planners, Architects | Planning Authority | Current |
-| **Operational State** | [`STATE.md`](../STATE.md) | Session Ledger | Pair Programmers | Dynamic State | Current |
-| **`smirk-effectful` Package** | [`effectful/README.md`](../effectful/README.md) | Package Overview | Effectful Consumers | Package Authority | Current |
-| **`smirk-polysemy` Package** | [`polysemy/README.md`](../polysemy/README.md) | Package Overview | Polysemy Consumers | Package Authority | Current |
+| **`smirk` Package** | [`packages/smirk/README.md`](../packages/smirk/README.md) | Package Overview | Core Regex Consumers | Package Authority | Current |
+| **`smirk-effectful` Package** | [`packages/smirk-effectful/README.md`](../packages/smirk-effectful/README.md) | Package Overview | Effectful Consumers | Package Authority | Current |
+| **`smirk-polysemy` Package** | [`packages/smirk-polysemy/README.md`](../packages/smirk-polysemy/README.md) | Package Overview | Polysemy Consumers | Package Authority | Current |
+| **`smirk-penelope` Package** | [`packages/smirk-penelope/README.md`](../packages/smirk-penelope/README.md) | Package Overview | Penelope Consumers | Package Authority | Current |
 
 ---
 
@@ -39,14 +40,15 @@ Welcome to the `smirk` technical documentation corpus.
 3. [`docs/TUTORIAL.md`](TUTORIAL.md) §7 — Native POSIX and Git-style globbing.
 
 ### Path C: Effect System Architect
-1. [`effectful/README.md`](../effectful/README.md) & [`docs/TUTORIAL.md`](TUTORIAL.md) §6.1 — `Smirk.Effect.Effectful` integration.
-2. [`polysemy/README.md`](../polysemy/README.md) & [`docs/TUTORIAL.md`](TUTORIAL.md) §6.2 — `Smirk.Effect.Polysemy` integration.
-3. [`docs/notes/SMIRK_DESIGN.md`](notes/SMIRK_DESIGN.md) D5 — Decoupled multi-package architecture.
+1. [`packages/smirk-effectful/README.md`](../packages/smirk-effectful/README.md) & [`docs/TUTORIAL.md`](TUTORIAL.md) §6.1 — `Smirk.Effect.Effectful` integration.
+2. [`packages/smirk-polysemy/README.md`](../packages/smirk-polysemy/README.md) & [`docs/TUTORIAL.md`](TUTORIAL.md) §6.2 — `Smirk.Effect.Polysemy` integration.
+3. [`packages/smirk-penelope/README.md`](../packages/smirk-penelope/README.md) — `Smirk.Effect.Penelope` integration.
+4. [`docs/notes/SMIRK_DESIGN.md`](notes/SMIRK_DESIGN.md) D5 — Decoupled multi-package architecture.
 
 ### Path D: Systems & Security Engineer (ReDoS Defense)
 1. [`docs/notes/SMIRK_DESIGN.md`](notes/SMIRK_DESIGN.md) D1–D3 — Pike VM architecture, explicit backtracking stack, and fuel-bounded execution.
 2. [`docs/TUTORIAL.md`](TUTORIAL.md) §3–§4 — Step budgeting, `OutOfFuel`, and pausable/resumable continuations.
-3. [`src/Smirk/Engine/VM.hs`](../src/Smirk/Engine/VM.hs) — Core step-bounded virtual machine execution loop.
+3. [`packages/smirk/src/Smirk/Engine/VM.hs`](../packages/smirk/src/Smirk/Engine/VM.hs) — Core step-bounded virtual machine execution loop.
 
 ### Path E: AI Coding Assistant & Maintainer
 1. [`AGENTS.md`](../AGENTS.md) — Operational instructions, token conservation, and two-file loop.
@@ -58,9 +60,10 @@ Welcome to the `smirk` technical documentation corpus.
 
 ## 3. Multi-Package Catalog
 
-- **`smirk` (Root)**: Core library containing the Megaparsec parser, AST compiler, Pike VM, sequence polymorphism, and QuasiQuoters.
-- **[`effectful/`](../effectful/) (`smirk-effectful`)**: Algebraic effect interface exposing `RegexEngine` and pure/fuel-bounded interpreters for `effectful`.
-- **[`polysemy/`](../polysemy/) (`smirk-polysemy`)**: Extensible effect interface exposing `RegexEngine` and pure/fuel-bounded interpreters for `polysemy`.
+- **[`packages/smirk/`](../packages/smirk/) (`smirk`)**: Core library containing the Megaparsec parser, AST compiler, Pike VM, sequence polymorphism, and QuasiQuoters.
+- **[`packages/smirk-effectful/`](../packages/smirk-effectful/) (`smirk-effectful`)**: Algebraic effect interface exposing `RegexEngine` and pure/fuel-bounded interpreters for `effectful`.
+- **[`packages/smirk-polysemy/`](../packages/smirk-polysemy/) (`smirk-polysemy`)**: Extensible effect interface exposing `RegexEngine` and pure/fuel-bounded interpreters for `polysemy`.
+- **[`packages/smirk-penelope/`](../packages/smirk-penelope/) (`smirk-penelope`)**: Algebraic effect interface exposing `RegexEngine` and pure/fuel-bounded interpreters for `penelope`.
 
 ---
 

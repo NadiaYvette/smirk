@@ -36,13 +36,14 @@ The library's name and symbol—**Smirk** (**;-P** / **;-)**)—express cheeky, 
 
 ## Multi-Package Catalog
 
-The repository is structured into three independent, modular Cabal packages:
+The repository is structured into four independent, modular Cabal packages:
 
 | Package | Directory | Description | Hackage Status |
 | :--- | :--- | :--- | :--- |
-| **`smirk`** | [`./`](.) | Core engine: Megaparsec PCRE parser, AST, bytecode compiler, Pike VM, sequence polymorphism, glob engine, and QuasiQuoters (`[re|...|]`, `[ed|...|]`, `[glob|...|]`). Zero effect dependencies. | Ready (0.1.0.0) |
-| **`smirk-effectful`** | [`effectful/`](effectful/) | First-class algebraic effect (`RegexEngine`) for the `effectful` ecosystem, featuring pure and fuel-bounded interpreters. Depends only on `smirk` and `effectful`. | Ready (0.1.0.0) |
-| **`smirk-polysemy`** | [`polysemy/`](polysemy/) | Extensible effect (`RegexEngine`) for the `polysemy` ecosystem, featuring pure and fuel-bounded interpreters. Depends only on `smirk` and `polysemy`. | Ready (0.1.0.0) |
+| **`smirk`** | [`packages/smirk/`](packages/smirk/) | Core engine: Megaparsec PCRE parser, AST, bytecode compiler, Pike VM, sequence polymorphism, glob engine, and QuasiQuoters (`[re|...|]`, `[ed|...|]`, `[glob|...|]`). Zero effect dependencies. | Ready (0.1.0.0) |
+| **`smirk-effectful`** | [`packages/smirk-effectful/`](packages/smirk-effectful/) | First-class algebraic effect (`RegexEngine`) for the `effectful` ecosystem, featuring pure and fuel-bounded interpreters. Depends only on `smirk` and `effectful`. | Ready (0.1.0.0) |
+| **`smirk-polysemy`** | [`packages/smirk-polysemy/`](packages/smirk-polysemy/) | Extensible effect (`RegexEngine`) for the `polysemy` ecosystem, featuring pure and fuel-bounded interpreters. Depends only on `smirk` and `polysemy`. | Ready (0.1.0.0) |
+| **`smirk-penelope`** | [`packages/smirk-penelope/`](packages/smirk-penelope/) | Algebraic effect façade (`RegexEngine`) for the `penelope` effect system, featuring zero-cost vector-dispatched interpreters over flat Polytropos row vectors. | Ready (0.1.0.0) |
 
 ---
 

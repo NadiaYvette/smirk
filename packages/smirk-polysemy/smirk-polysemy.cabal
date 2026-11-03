@@ -1,12 +1,12 @@
 cabal-version:      3.0
-name:               smirk-effectful
+name:               smirk-polysemy
 version:            0.1.0.0
-synopsis:           Effectful (algebraic effects) interface for the Smirk PCRE engine
+synopsis:           Polysemy interface for the Smirk PCRE engine
 description:
-    Exposes Smirk's pure, step-bounded PCRE engine as an 'effectful' first-class
-    effect ('Smirk.Effect.Effectful'), with pure and fuel-bounded interpreters.
+    Exposes Smirk's pure, step-bounded PCRE engine as a 'polysemy' effect
+    ('Smirk.Effect.Polysemy'), with pure and fuel-bounded interpreters.
     This package depends on the plain 'smirk' package for the core engine, so
-    consumers who only need effectful (not polysemy) do not drag in polysemy.
+    consumers who only need polysemy (not effectful) do not drag in effectful.
 license:            Apache-2.0
 license-file:       LICENSE
 author:             Nadia Yvette Chambers
@@ -23,7 +23,7 @@ extra-doc-files:
 source-repository head
     type:     git
     location: https://github.com/NadiaYvette/smirk.git
-    subdir:   effectful
+    subdir:   packages/smirk-polysemy
 
 common common-options
     default-language:   GHC2021
@@ -58,24 +58,22 @@ library
     import:             common-options
     hs-source-dirs:     src
     exposed-modules:
-        Smirk.Effect.Effectful
+        Smirk.Effect.Polysemy
     build-depends:
         base >= 4.16 && < 5,
-        effectful >= 2.0 && < 3,
-        effectful-core >= 2.0 && < 3,
-        effectful-th >= 1.0 && < 2,
+        polysemy >= 1.9 && < 2,
         smirk >= 0.1 && < 0.2,
         text >= 2.0 && < 3
 
-test-suite smirk-effectful-test
+test-suite smirk-polysemy-test
     import:             common-options
     type:               exitcode-stdio-1.0
     hs-source-dirs:     test
     main-is:            Spec.hs
     build-depends:
         base >= 4.16 && < 5,
-        effectful >= 2.0 && < 3,
         hspec >= 2.10 && < 3,
+        polysemy >= 1.9 && < 2,
         smirk >= 0.1 && < 0.2,
-        smirk-effectful,
+        smirk-polysemy,
         text >= 2.0 && < 3

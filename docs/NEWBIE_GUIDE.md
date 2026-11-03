@@ -30,30 +30,37 @@ Level 2: Targeted Slice     (view_file StartLine / EndLine)       →   ~200–5
 
 | If you are looking for... | Look in module | Source Location |
 | :--- | :--- | :--- |
-| `compileRegex`, `execMatch`, `testMatch`, `execMatchWithFuel` | `Smirk` | [`src/Smirk.hs`](../src/Smirk.hs) |
-| `AST`, `CharClass`, `CharRange`, `Anchor`, `RepKind`, `Flags` | `Smirk.Core.AST` | [`src/Smirk/Core/AST.hs`](../src/Smirk/Core/AST.hs) |
-| `Opcode`, `Program`, `Regex` | `Smirk.Core.Bytecode` | [`src/Smirk/Core/Bytecode.hs`](../src/Smirk/Core/Bytecode.hs) |
-| `compileAST`, `compileToRegex`, `assignGroupIndices` | `Smirk.Core.Compiler` | [`src/Smirk/Core/Compiler.hs`](../src/Smirk/Core/Compiler.hs) |
-| `parsePCRE`, `parsePCREWithFlags`, `pAlternation`, `pGroup` | `Smirk.Core.Parser` | [`src/Smirk/Core/Parser.hs`](../src/Smirk/Core/Parser.hs) |
-| `re`, `ed`, `Editor`, `applyEditor`, `replaceMatch` | `Smirk.Core.Quote` | [`src/Smirk/Core/Quote.hs`](../src/Smirk/Core/Quote.hs) |
-| `RegexTarget`, `seqLength`, `seqIndex`, `seqSlice`, `seqToText` | `Smirk.Engine.Sequence` | [`src/Smirk/Engine/Sequence.hs`](../src/Smirk/Engine/Sequence.hs) |
-| `Fuel`, `MatchResult`, `MatchStatus`, `MatchContinuation`, `runMatch`, `stepVM` | `Smirk.Engine.VM` | [`src/Smirk/Engine/VM.hs`](../src/Smirk/Engine/VM.hs) |
-| `compileGlob`, `compileWildcard`, `matchGlob`, `glob` | `Smirk.Glob` | [`src/Smirk/Glob.hs`](../src/Smirk/Glob.hs) |
-| Full unit & property tests | `Spec` (Test) | [`test/Spec.hs`](../test/Spec.hs) |
+| `compileRegex`, `execMatch`, `testMatch`, `execMatchWithFuel` | `Smirk` | [`packages/smirk/src/Smirk.hs`](../packages/smirk/src/Smirk.hs) |
+| `AST`, `CharClass`, `CharRange`, `Anchor`, `RepKind`, `Flags` | `Smirk.Core.AST` | [`packages/smirk/src/Smirk/Core/AST.hs`](../packages/smirk/src/Smirk/Core/AST.hs) |
+| `Opcode`, `Program`, `Regex` | `Smirk.Core.Bytecode` | [`packages/smirk/src/Smirk/Core/Bytecode.hs`](../packages/smirk/src/Smirk/Core/Bytecode.hs) |
+| `compileAST`, `compileToRegex`, `assignGroupIndices` | `Smirk.Core.Compiler` | [`packages/smirk/src/Smirk/Core/Compiler.hs`](../packages/smirk/src/Smirk/Core/Compiler.hs) |
+| `parsePCRE`, `parsePCREWithFlags`, `pAlternation`, `pGroup` | `Smirk.Core.Parser` | [`packages/smirk/src/Smirk/Core/Parser.hs`](../packages/smirk/src/Smirk/Core/Parser.hs) |
+| `re`, `ed`, `Editor`, `applyEditor`, `replaceMatch` | `Smirk.Core.Quote` | [`packages/smirk/src/Smirk/Core/Quote.hs`](../packages/smirk/src/Smirk/Core/Quote.hs) |
+| `RegexTarget`, `seqLength`, `seqIndex`, `seqSlice`, `seqToText` | `Smirk.Engine.Sequence` | [`packages/smirk/src/Smirk/Engine/Sequence.hs`](../packages/smirk/src/Smirk/Engine/Sequence.hs) |
+| `Fuel`, `MatchResult`, `MatchStatus`, `MatchContinuation`, `runMatch`, `stepVM` | `Smirk.Engine.VM` | [`packages/smirk/src/Smirk/Engine/VM.hs`](../packages/smirk/src/Smirk/Engine/VM.hs) |
+| `compileGlob`, `compileWildcard`, `matchGlob`, `glob` | `Smirk.Glob` | [`packages/smirk/src/Smirk/Glob.hs`](../packages/smirk/src/Smirk/Glob.hs) |
+| Full unit & property tests | `Spec` (Test) | [`packages/smirk/test/Spec.hs`](../packages/smirk/test/Spec.hs) |
 
 ### Effectful Ecosystem (`smirk-effectful`)
 
 | If you are looking for... | Look in module | Source Location |
 | :--- | :--- | :--- |
-| `RegexEngine`, `matchRegex`, `runRegexEnginePure`, `runRegexEngineWithFuel` | `Smirk.Effect.Effectful` | [`effectful/src/Smirk/Effect/Effectful.hs`](../effectful/src/Smirk/Effect/Effectful.hs) |
-| Effectful test suite | `Spec` (Test) | [`effectful/test/Spec.hs`](../effectful/test/Spec.hs) |
+| `RegexEngine`, `matchRegex`, `runRegexEnginePure`, `runRegexEngineWithFuel` | `Smirk.Effect.Effectful` | [`packages/smirk-effectful/src/Smirk/Effect/Effectful.hs`](../packages/smirk-effectful/src/Smirk/Effect/Effectful.hs) |
+| Effectful test suite | `Spec` (Test) | [`packages/smirk-effectful/test/Spec.hs`](../packages/smirk-effectful/test/Spec.hs) |
 
 ### Polysemy Ecosystem (`smirk-polysemy`)
 
 | If you are looking for... | Look in module | Source Location |
 | :--- | :--- | :--- |
-| `RegexEngine`, `matchRegex`, `runRegexEnginePure`, `runRegexEngineWithFuel` | `Smirk.Effect.Polysemy` | [`polysemy/src/Smirk/Effect/Polysemy.hs`](../polysemy/src/Smirk/Effect/Polysemy.hs) |
-| Polysemy test suite | `Spec` (Test) | [`polysemy/test/Spec.hs`](../polysemy/test/Spec.hs) |
+| `RegexEngine`, `matchRegex`, `runRegexEnginePure`, `runRegexEngineWithFuel` | `Smirk.Effect.Polysemy` | [`packages/smirk-polysemy/src/Smirk/Effect/Polysemy.hs`](../packages/smirk-polysemy/src/Smirk/Effect/Polysemy.hs) |
+| Polysemy test suite | `Spec` (Test) | [`packages/smirk-polysemy/test/Spec.hs`](../packages/smirk-polysemy/test/Spec.hs) |
+
+### Penelope Ecosystem (`smirk-penelope`)
+
+| If you are looking for... | Look in module | Source Location |
+| :--- | :--- | :--- |
+| `RegexEngine`, `matchRegex`, `runRegexEnginePure`, `runRegexEngineM` | `Smirk.Effect.Penelope` | [`packages/smirk-penelope/src/Smirk/Effect/Penelope.hs`](../packages/smirk-penelope/src/Smirk/Effect/Penelope.hs) |
+| Penelope test suite | `Spec` (Test) | [`packages/smirk-penelope/test/Spec.hs`](../packages/smirk-penelope/test/Spec.hs) |
 
 ---
 
