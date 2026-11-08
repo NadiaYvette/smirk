@@ -88,3 +88,21 @@ Historically, Haskell regular expression solutions presented several major drawb
 - **Note [Forge-Tiered CI Resource Allocation and Static Gate Partitioning]** (`docs/notes/DOC_STRATEGY.md`):  
   `[ref:note-forge-tiered-ci]`  
   Details CI execution tiering across GitHub Actions, Framagit, and Radicle.
+- **Note [Pike VM Flat Capture Register Allocation]** (`Smirk.Core.Types`):  
+  `[ref:note-pike-vm-flat-captures]`  
+  Replaces pointer-chasing maps with flat unboxed PrimArray registers.
+- **Note [Polytropos Record Representations for Named Captures]** (`Smirk.Core.Types`):  
+  `[ref:note-polytropos-capture-reps]`  
+  Projects named capture groups into row-polymorphic Polytropos Rep structures.
+- **Note [Static AST Nullability Analysis]** (`Smirk.Core.Evacuable`):  
+  `[ref:note-static-ast-nullability]`  
+  Decides whether epsilon is in L(r) statically at compile time without VM allocation.
+- **Note [Non-Empty Target Polymorphism]** (`Smirk.Core.Evacuable`):  
+  `[ref:note-non-empty-target-polymorphism]`  
+  Witnesses matchLength >= 1 at the type level across String, Text, ByteString, Seq, and Vector.
+- **Note [Linear Continuation Discipline]** (`Smirk.Core.Cursor`):  
+  `[ref:note-linear-continuation-discipline]`  
+  Guarantees single-shot resumption under -XLinearTypes without continuation duplication.
+- **Note [Graded Lookbehind Cursor]** (`Smirk.Core.Cursor`):  
+  `[ref:note-graded-lookbehind-cursor]`  
+  Tracks type-level lookbehind horizon bounds and safely evacuates dead prefix data.

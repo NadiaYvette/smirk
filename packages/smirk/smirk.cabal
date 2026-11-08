@@ -63,6 +63,7 @@ library
         Smirk.Core.Parser
         Smirk.Core.Bytecode
         Smirk.Core.Compiler
+        Smirk.Core.Cursor
         Smirk.Core.Evacuable
         Smirk.Core.Quote
         Smirk.Core.Types
@@ -88,6 +89,7 @@ test-suite smirk-test
     hs-source-dirs:     test
     main-is:            Spec.hs
     other-modules:
+        CursorSpec
         ParserSpec
         VMSpec
         SequenceSpec

@@ -299,10 +299,11 @@ data MatchContinuation s = MatchContinuation
   , currentThread    :: !ThreadState    -- ^ Active thread state at suspension point
   , backtrackStack   :: ![ThreadState]  -- ^ Pending alternative branches
   , currentSteps     :: !Int            -- ^ Total steps executed up to suspension
-  }
+  } deriving stock (Eq, Show, Generic)
 
 -- | Verdict of a matching operation.
 data MatchStatus s
   = Matched !(MatchResult s)            -- ^ A match was successfully found
   | NoMatch                             -- ^ The pattern does not match the target
   | OutOfFuel !(MatchContinuation s)    -- ^ Fuel budget exhausted; resumable
+  deriving stock (Eq, Show, Generic)

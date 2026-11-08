@@ -110,6 +110,33 @@ module Smirk
   , toNamedCaptureRep
   , matchNamedCaptureRep
   , lookupNamedCaptureRep
+
+    -- * Linear Continuation & Graded Modal Cursor Discipline
+  , MatchOutcome (..)
+  , mkMatchOutcome
+  , outcomeToStatus
+  , outcomeToMaybeResult
+  , ResumeLinear (..)
+  , resumeLinear
+  , mkResumeLinear
+  , LinearContinuation (..)
+  , toLinearContinuation
+  , fromLinearContinuation
+  , resumeLinearCont
+  , EvacuatedBytes (..)
+  , GradedCursor (..)
+  , mkGradedCursor
+  , mkGradedCursorAt
+  , cursorHorizon
+  , advanceMinActive
+  , minimumActiveOffset
+  , cursorFromContinuation
+  , safeEvacuationHorizon
+  , evacuatePrefix
+  , cursorRemainingLength
+  , cursorSlice
+  , cursorToRelativeOffset
+  , cursorFromRelativeOffset
   ) where
 
 import Data.Text (Text)
@@ -117,6 +144,7 @@ import Data.Text (Text)
 import Smirk.Core.AST
 import Smirk.Core.Bytecode
 import Smirk.Core.Compiler
+import Smirk.Core.Cursor
 import Smirk.Core.Evacuable
 import Smirk.Core.Parser
 import Smirk.Core.Quote
@@ -129,6 +157,7 @@ import Smirk.Glob
 -- Returns a parse error description as 'Left' on failure.
 compileRegex :: Text -> Either Text Regex
 compileRegex = compileRegexWithFlags defaultFlags
+{-# INLINE compileRegex #-}
 
 -- | Compile a PCRE regular expression string with explicit compilation 't:Flags'.
 compileRegexWithFlags :: Flags -> Text -> Either Text Regex
