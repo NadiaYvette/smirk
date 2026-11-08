@@ -21,6 +21,7 @@ intermediate conversions.
 -}
 module Smirk.Engine.Sequence
   ( RegexTarget (..)
+  , utf8CharByteWidth
   ) where
 
 import qualified Data.ByteString as BS
@@ -30,6 +31,7 @@ import Data.Sequence (Seq)
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Foreign as TF
 import qualified Data.Vector as V
 import Data.Vector (Vector)
 
@@ -53,6 +55,16 @@ class RegexTarget s where
   -- | Construct a sequence from strict 'Text'.
   seqFromText :: Text -> s
 
+  -- | Physical UTF-8 byte length of the sequence.
+  -- For strict 'Text' and strict 'BS.ByteString', this operation is $O(1)$.
+  utf8ByteLength :: s -> Int
+
+  -- | Physical UTF-8 byte width of a slice specified by character offset and character length.
+  -- For strict 'Text' and strict 'BS.ByteString', this operation is $O(1)$ on the slice.
+  utf8SliceByteWidth :: Int -> Int -> s -> Int
+  utf8SliceByteWidth off len s = utf8ByteLength (seqSlice off len s)
+  {-# INLINE utf8SliceByteWidth #-}
+
 -- | Instance for strict 'Text' (standard high-performance string representation).
 instance RegexTarget Text where
   seqLength = T.length
@@ -72,6 +84,12 @@ instance RegexTarget Text where
   seqFromText = id
   {-# INLINE seqFromText #-}
 
+  utf8ByteLength = TF.lengthWord8
+  {-# INLINE utf8ByteLength #-}
+
+  utf8SliceByteWidth off len t = TF.lengthWord8 (seqSlice off len t)
+  {-# INLINE utf8SliceByteWidth #-}
+
 -- | Instance for strict 'BS.ByteString' (interprets bytes as ASCII / Latin-1 codepoints).
 instance RegexTarget BS.ByteString where
   seqLength = BS.length
@@ -90,6 +108,12 @@ instance RegexTarget BS.ByteString where
 
   seqFromText = TE.encodeUtf8
   {-# INLINE seqFromText #-}
+
+  utf8ByteLength = BS.length
+  {-# INLINE utf8ByteLength #-}
+
+  utf8SliceByteWidth off len bs = BS.length (seqSlice off len bs)
+  {-# INLINE utf8SliceByteWidth #-}
 
 -- | Instance for standard linked list of characters ('[Char]' / 'String').
 instance RegexTarget [Char] where
@@ -112,6 +136,12 @@ instance RegexTarget [Char] where
   seqFromText = T.unpack
   {-# INLINE seqFromText #-}
 
+  utf8ByteLength = foldl' (\acc c -> acc + utf8CharByteWidth c) 0
+  {-# INLINE utf8ByteLength #-}
+
+  utf8SliceByteWidth off len xs = utf8ByteLength (seqSlice off len xs)
+  {-# INLINE utf8SliceByteWidth #-}
+
 -- | Instance for finger-tree based 'Seq' collections.
 instance RegexTarget (Seq Char) where
   seqLength = Seq.length
@@ -129,6 +159,12 @@ instance RegexTarget (Seq Char) where
   seqFromText t = Seq.fromList (T.unpack t)
   {-# INLINE seqFromText #-}
 
+  utf8ByteLength = foldl' (\acc c -> acc + utf8CharByteWidth c) 0
+  {-# INLINE utf8ByteLength #-}
+
+  utf8SliceByteWidth off len sq = utf8ByteLength (seqSlice off len sq)
+  {-# INLINE utf8SliceByteWidth #-}
+
 -- | Instance for contiguous 'Vector' arrays.
 instance RegexTarget (Vector Char) where
   seqLength = V.length
@@ -145,3 +181,18 @@ instance RegexTarget (Vector Char) where
 
   seqFromText t = V.fromList (T.unpack t)
   {-# INLINE seqFromText #-}
+
+  utf8ByteLength = V.foldl' (\acc c -> acc + utf8CharByteWidth c) 0
+  {-# INLINE utf8ByteLength #-}
+
+  utf8SliceByteWidth off len v = utf8ByteLength (seqSlice off len v)
+  {-# INLINE utf8SliceByteWidth #-}
+
+-- | Number of UTF-8 encoded bytes occupied by a single Unicode character.
+utf8CharByteWidth :: Char -> Int
+utf8CharByteWidth c
+  | c <= '\x7F'   = 1
+  | c <= '\x7FF'  = 2
+  | c <= '\xFFFF' = 3
+  | otherwise     = 4
+{-# INLINE utf8CharByteWidth #-}

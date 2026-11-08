@@ -4,7 +4,9 @@
 module VMSpec (spec) where
 
 import qualified Data.Map.Strict as Map
+import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray)
 import Data.Text (Text)
+import Polytropos.Core (repTag)
 import Test.Hspec
 
 import Smirk
@@ -31,6 +33,32 @@ spec = describe "Smirk.Engine.VM" $ do
           Map.lookup "protocol" res.namedGroups `shouldBe` Just "https"
           Map.lookup "domain" res.namedGroups `shouldBe` Just "haskell.org"
         Nothing -> expectationFailure "Expected capture groups match"
+      Left err -> expectationFailure (show err)
+
+  it "stores capture spans in unboxed CaptureSlots and projects to Polytropos Rep" $ do
+    case compileRegex "(?<proto>https?)://(?<host>[a-z.]+)" of
+      Right reg -> case execMatch reg ("request https://github.com now" :: Text) of
+        Just res -> do
+          -- Full match span
+          getCaptureSpan 0 res.captureSlots `shouldBe` Just (8, 26)
+          -- Group 1 (proto)
+          getCaptureSpan 1 res.captureSlots `shouldBe` Just (8, 13)
+          -- Group 2 (host)
+          getCaptureSpan 2 res.captureSlots `shouldBe` Just (16, 26)
+
+          -- SmallArray named projection
+          let arr = toNamedCaptureSmallArray reg res.captureSlots ("request https://github.com now" :: Text)
+          -- Lexicographical order: "host" (index 0), "proto" (index 1)
+          sizeofSmallArray arr `shouldBe` 2
+          indexSmallArray arr 0 `shouldBe` Just "github.com"
+          indexSmallArray arr 1 `shouldBe` Just "https"
+
+          -- Polytropos Rep projection
+          let rep = toNamedCaptureRep reg res.captureSlots ("request https://github.com now" :: Text)
+          repTag rep `shouldBe` 0
+          lookupNamedCaptureRep "host" reg rep `shouldBe` Just ("github.com" :: Text)
+          lookupNamedCaptureRep "proto" reg rep `shouldBe` Just ("https" :: Text)
+        Nothing -> expectationFailure "Expected match for url"
       Left err -> expectationFailure (show err)
 
   it "matches positive and negative lookahead assertions" $ do

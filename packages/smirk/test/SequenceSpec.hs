@@ -54,3 +54,27 @@ spec = describe "Smirk.Engine.Sequence" $ do
       Just res -> do
         res.matchedSlice `shouldBe` V.fromList "42-smirk"
       Nothing -> expectationFailure "Expected Vector match"
+
+  it "measures ASCII UTF-8 physical byte footprint correctly" $ do
+    let t = ("hello world" :: Text)
+        bs = ("hello world" :: BS.ByteString)
+        str = ("hello world" :: String)
+        sq = Seq.fromList "hello world"
+        v = V.fromList "hello world"
+    utf8ByteLength t `shouldBe` 11
+    utf8ByteLength bs `shouldBe` 11
+    utf8ByteLength str `shouldBe` 11
+    utf8ByteLength sq `shouldBe` 11
+    utf8ByteLength v `shouldBe` 11
+
+  it "measures multi-byte Unicode codepoints and slice byte widths correctly" $ do
+    -- 'λ' is 2 bytes, '€' is 3 bytes, '🦀' (crab emoji) is 4 bytes
+    let t = ("λ € 🦀" :: Text)
+        -- chars: 5 ('λ', ' ', '€', ' ', '🦀')
+        -- bytes: 2 + 1 + 3 + 1 + 4 = 11 bytes
+    seqLength t `shouldBe` 5
+    utf8ByteLength t `shouldBe` 11
+    utf8SliceByteWidth 0 1 t `shouldBe` 2 -- 'λ'
+    utf8SliceByteWidth 2 1 t `shouldBe` 3 -- '€'
+    utf8SliceByteWidth 4 1 t `shouldBe` 4 -- '🦀'
+    utf8SliceByteWidth 0 3 t `shouldBe` 6 -- "λ €" = 2 + 1 + 3 = 6 bytes

@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
 {- |
@@ -21,6 +21,9 @@ nondeterministic state machine with an explicit backtracking continuation stack.
   time-sliced regex execution.
 * __Sequence Polymorphism:__ Character lookups and slice extractions are dispatched
   via the 'RegexTarget' class without intermediate string conversions.
+* __Flat Unboxed Capture Registers:__ Capture group boundaries are tracked in flat
+  unboxed 'CaptureSlots' ('Data.Primitive.PrimArray.PrimArray Int') rather than
+  pointer-chasing tree maps, per [ref:note-pike-vm-flat-captures].
 -}
 module Smirk.Engine.VM
   ( -- * Fuel & Budgeting
@@ -35,8 +38,21 @@ module Smirk.Engine.VM
   , resumeMatch
   , findAllMatches
 
-    -- * Internal VM Engine
+    -- * Internal VM Engine & Capture Registers
   , ThreadState (..)
+  , CaptureSlots (..)
+  , emptyCaptureSlots
+  , getCaptureStart
+  , getCaptureEnd
+  , getCaptureSpan
+  , setCaptureStart
+  , setCaptureEnd
+  , toCaptureMap
+  , toFullMatchSpan
+  , toNamedCaptureSmallArray
+  , toNamedCaptureRep
+  , matchNamedCaptureRep
+  , lookupNamedCaptureRep
   , stepVM
   , matchClass
   , matchAnchor
@@ -44,13 +60,30 @@ module Smirk.Engine.VM
 
 import Data.Char (isAlphaNum, isDigit, isSpace)
 import qualified Data.Map.Strict as Map
-import Data.Map.Strict (Map)
-import Data.Text (Text)
 import qualified Data.Vector as V
-import GHC.Generics (Generic)
 
 import Smirk.Core.AST (Anchor (..), CharClass (..), CharRange (..))
 import Smirk.Core.Bytecode (Opcode (..), Regex (..))
+import Smirk.Core.Types
+  ( CaptureSlots (..)
+  , Fuel (..)
+  , MatchContinuation (..)
+  , MatchResult (..)
+  , MatchStatus (..)
+  , ThreadState (..)
+  , emptyCaptureSlots
+  , getCaptureEnd
+  , getCaptureSpan
+  , getCaptureStart
+  , lookupNamedCaptureRep
+  , matchNamedCaptureRep
+  , setCaptureEnd
+  , setCaptureStart
+  , toCaptureMap
+  , toFullMatchSpan
+  , toNamedCaptureRep
+  , toNamedCaptureSmallArray
+  )
 import Smirk.Engine.Sequence (RegexTarget (..))
 
 {- Note [Pike VM State Machine and Backtracking Stack]
@@ -80,49 +113,10 @@ grammars like (a+)+$.
 To neutralize this threat, Smirk introduces the 'Fuel' budget:
 1. Every iteration of 'stepVM' consumes exactly 1 unit of fuel.
 2. If steps >= budget, the machine halts immediately and packages the active thread
-   and backtrack stack into 'OutOfFuel (MatchContinuation ...)'.
+    and backtrack stack into 'OutOfFuel (MatchContinuation ...)'.
 3. The host application can inspect the partial progress, abort, or allocate more
-   fuel to resume via 'resumeMatch'.
+    fuel to resume via 'resumeMatch'.
 -}
-
--- | Execution fuel budget for step bounding and ReDoS prevention.
-data Fuel
-  = StepBudget !Int    -- ^ Bounded execution: halt after N instruction steps
-  | Unlimited          -- ^ Unbounded execution: run to completion or exhaustion
-  deriving (Eq, Show, Generic)
-
--- | Successful regular expression match result with full capture offsets.
-data MatchResult s = MatchResult
-  { matchedSlice  :: !s             -- ^ Exact matched slice of the input
-  , matchOffset   :: !Int           -- ^ 0-based character offset where match begins
-  , matchLength   :: !Int           -- ^ Total length (in characters) of the matched slice
-  , captureGroups :: !(Map Int s)   -- ^ Numbered capture groups (1-indexed)
-  , namedGroups   :: !(Map Text s)  -- ^ Named capture groups mapped to slices
-  , stepsConsumed :: !Int           -- ^ Total VM steps executed to find this match
-  } deriving (Eq, Show, Generic)
-
--- | Pausable and resumable execution continuation captured when fuel is exhausted.
-data MatchContinuation s = MatchContinuation
-  { savedRegex       :: !Regex          -- ^ The compiled regex being evaluated
-  , savedTarget      :: !s              -- ^ The target sequence
-  , savedStartIndex  :: !Int            -- ^ Outer search loop start offset
-  , currentThread    :: !ThreadState    -- ^ Active thread state at suspension point
-  , backtrackStack   :: ![ThreadState]  -- ^ Pending alternative branches
-  , currentSteps     :: !Int            -- ^ Total steps executed up to suspension
-  }
-
--- | Verdict of a matching operation.
-data MatchStatus s
-  = Matched !(MatchResult s)            -- ^ A match was successfully found
-  | NoMatch                             -- ^ The pattern does not match the target
-  | OutOfFuel !(MatchContinuation s)    -- ^ Fuel budget exhausted; resumable
-
--- | Internal VM thread execution state.
-data ThreadState = ThreadState
-  { pc     :: !Int                          -- ^ Program counter: index into program vector
-  , strIdx :: !Int                          -- ^ Current position in target character sequence
-  , saves  :: !(Map Int (Int, Maybe Int))   -- ^ Capture registers: group idx -> (start, optional end)
-  } deriving (Eq, Show, Generic)
 
 -- | Execute regex search across a sequence starting from index 0.
 runMatch :: RegexTarget s => Regex -> s -> Fuel -> MatchStatus s
@@ -135,7 +129,7 @@ runMatchAt regex target startIdx fuel =
   in if startIdx > len
        then NoMatch
        else
-         let initialThread = ThreadState 0 startIdx Map.empty
+         let initialThread = ThreadState 0 startIdx (emptyCaptureSlots (regex.maxGroupIndex + 1))
          in stepVM regex target startIdx initialThread [] 0 fuel
 
 -- | Resume a previously suspended match with additional fuel.
@@ -216,11 +210,11 @@ stepVM regex target startIdx th stack steps fuel =
                stepVM regex target startIdx th { pc = pc' + d } stack (steps + 1) fuel
 
              OpSaveStart idx ->
-               let saves' = Map.insert idx (th.strIdx, Nothing) th.saves
+               let !saves' = setCaptureStart idx th.strIdx th.saves
                in stepVM regex target startIdx th { pc = pc' + 1, saves = saves' } stack (steps + 1) fuel
 
              OpSaveEnd idx ->
-               let saves' = Map.adjust (\(s, _) -> (s, Just th.strIdx)) idx th.saves
+               let !saves' = setCaptureEnd idx th.strIdx th.saves
                in stepVM regex target startIdx th { pc = pc' + 1, saves = saves' } stack (steps + 1) fuel
 
              OpAssertLookahead subProg isPos ->
@@ -244,8 +238,8 @@ stepVM regex target startIdx th stack steps fuel =
                     else backtrackOrNextStart regex target startIdx stack (steps + 1) fuel
 
              OpMatchBackRef idx ->
-               case Map.lookup idx th.saves of
-                 Just (st, Just en) ->
+               case getCaptureSpan idx th.saves of
+                 Just (st, en) ->
                    let refLen = en - st
                        refSlice = seqSlice st refLen target
                        targetSlice = seqSlice th.strIdx refLen target
@@ -283,23 +277,20 @@ backtrackOrNextStart regex target startIdx stack steps fuel =
       let nextStart = startIdx + 1
       in if nextStart <= seqLength target
            then
-             let freshThread = ThreadState 0 nextStart Map.empty
+             let freshThread = ThreadState 0 nextStart (emptyCaptureSlots (regex.maxGroupIndex + 1))
              in stepVM regex target nextStart freshThread [] steps fuel
            else NoMatch
 
 -- | Construct a final 't:MatchResult' from the terminating thread registers.
 buildResult :: RegexTarget s => Regex -> s -> ThreadState -> Int -> MatchResult s
 buildResult regex target th steps =
-  let (mOff, mLen) = case Map.lookup 0 th.saves of
-        Just (st, Just en) -> (st, en - st)
-        Just (st, Nothing) -> (st, th.strIdx - st)
-        Nothing            -> (0, th.strIdx)
+  let (mOff, mLen) = case getCaptureStart 0 th.saves of
+        Just st -> case getCaptureEnd 0 th.saves of
+          Just en -> (st, en - st)
+          Nothing -> (st, th.strIdx - st)
+        Nothing -> (0, th.strIdx)
       fullSlice = seqSlice mOff mLen target
-      caps = Map.fromList
-        [ (idx, seqSlice st (en - st) target)
-        | (idx, (st, Just en)) <- Map.toList th.saves
-        , idx /= 0
-        ]
+      caps = toCaptureMap th.saves target
       namedCaps = Map.fromList
         [ (name, capSlice)
         | (name, idx) <- Map.toList regex.groupNames
@@ -309,6 +300,7 @@ buildResult regex target th steps =
       { matchedSlice  = fullSlice
       , matchOffset   = mOff
       , matchLength   = mLen
+      , captureSlots  = th.saves
       , captureGroups = caps
       , namedGroups   = namedCaps
       , stepsConsumed = steps

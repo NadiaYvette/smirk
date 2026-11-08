@@ -64,6 +64,7 @@ library
         Smirk.Core.Bytecode
         Smirk.Core.Compiler
         Smirk.Core.Quote
+        Smirk.Core.Types
         Smirk.Engine.Sequence
         Smirk.Engine.VM
         Smirk.Glob
@@ -74,6 +75,8 @@ library
         megaparsec >= 9.0 && < 10,
         mono-traversable >= 1.0 && < 2,
         parser-combinators >= 1.3 && < 2,
+        polytropos-core >= 0.1,
+        primitive >= 0.7 && < 0.10,
         template-haskell >= 2.18 && < 3,
         text >= 2.0 && < 3,
         vector >= 0.12 && < 1
@@ -94,6 +97,8 @@ test-suite smirk-test
         bytestring >= 0.11 && < 1,
         containers >= 0.6 && < 1,
         hspec >= 2.10 && < 3,
+        polytropos-core >= 0.1,
+        primitive >= 0.7 && < 0.10,
         smirk,
         text >= 2.0 && < 3,
         vector >= 0.12 && < 1
