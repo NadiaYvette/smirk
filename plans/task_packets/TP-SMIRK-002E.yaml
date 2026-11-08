@@ -1,0 +1,9 @@
+id: TP-SMIRK-002E
+title: "Multi-Resource StepMetrics, MatchOutcome, and SuspendedCallout"
+description: |
+  Multi-Resource StepMetrics, MatchOutcome, and SuspendedCallout
+packages:
+  - smirk
+executor: script
+max_repair_attempts: 3
+allow_metered: false

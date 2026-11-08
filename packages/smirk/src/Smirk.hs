@@ -1,4 +1,5 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-# OPTIONS_GHC -Wno-pattern-namespace-specifier #-}
 
 {- |
 Module      : Smirk
@@ -78,8 +79,8 @@ module Smirk
 
     -- * Compiler & Bytecode
   , Opcode (..)
-  , data IRangeNat
-  , data ICallout
+  , pattern IRangeNat
+  , pattern ICallout
   , Program
   , parsePCRE
   , parsePCREWithFlags
@@ -94,6 +95,33 @@ module Smirk
   , MatchResult (..)
   , MatchStatus (..)
   , MatchContinuation (..)
+
+    -- * Multi-Resource Step Metrics & Match Outcomes
+  , StepMetrics (..)
+  , emptyStepMetrics
+  , runMatchWithMetrics
+  , runMatchWithMetricsAt
+  , runMatchWithMetricsWithMode
+  , runMatchWithMetricsAtWithMode
+  , resumeMatchWithMetrics
+  , runAutoProceed
+
+    -- * PCRE Callouts
+  , CalloutDecision (..)
+  , CalloutPayload (..)
+
+    -- * Pre-Allocated VM Frames & Thread Pools
+  , ThreadState (..)
+  , VMFrame (..)
+  , threadToFrame
+  , frameToThread
+  , VMFramePool (..)
+  , emptyVMFramePool
+  , readFrame
+  , threadsToFramePool
+  , framePoolToThreads
+
+    -- * Execution Entry Points
   , runMatch
   , runMatchAt
   , runMatchWithMode
@@ -174,15 +202,13 @@ compileRegexWithFlags flags input = do
 -- | Test if a target sequence matches a regular expression.
 -- Returns 'True' if a match is found anywhere in the target sequence.
 testMatch :: RegexTarget s => Regex -> s -> Bool
-testMatch reg target = case runMatch reg target Unlimited of
-  Matched _ -> True
-  _         -> False
+testMatch reg target = case execMatch reg target of
+  Just _  -> True
+  Nothing -> False
 
 -- | Execute regex search returning the first 't:MatchResult', if any.
 execMatch :: RegexTarget s => Regex -> s -> Maybe (MatchResult s)
-execMatch reg target = case runMatch reg target Unlimited of
-  Matched res -> Just res
-  _           -> Nothing
+execMatch reg target = runAutoProceed (runMatch reg target Unlimited)
 
 -- | Execute regex search bounded by a specific step budget.
 -- Returns 'OutOfFuel' with a continuation if the step threshold is exceeded.

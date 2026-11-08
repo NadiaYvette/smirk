@@ -234,3 +234,127 @@ spec = describe "Smirk.Engine.VM" $ do
               Map.lookup "val" res.namedGroups `shouldBe` Just "99"
             Nothing -> expectationFailure "Expected match for tagged callouts pattern"
         Left e -> expectationFailure (show e)
+
+  describe "Multi-Resource StepMetrics & MatchOutcome (TP-SMIRK-002E)" $ do
+    it "tracks steps, units scanned, and utf8 bytes on direct match" $ do
+      case compileRegex "smirk" of
+        Right reg -> do
+          let outcome = runMatchWithMetrics reg ("a smirk ;-)" :: Text) Unlimited
+          case outcome.outcomeStatus of
+            Matched res -> do
+              res.matchedSlice `shouldBe` "smirk"
+              outcome.outcomeMetrics.stepsConsumed `shouldSatisfy` (> 0)
+              outcome.outcomeMetrics.unitsScanned `shouldBe` 7
+              outcome.outcomeMetrics.utf8BytesMaterialized `shouldBe` 7
+              outcome.outcomeMetrics.activeThreadCount `shouldBe` 0
+              outcome.outcomeMetrics.fuelRemaining `shouldBe` Unlimited
+            _ -> expectationFailure "Expected Matched outcome"
+        Left e -> expectationFailure (show e)
+
+    it "tracks peak backtrack depth and non-zero active thread count on suspension" $ do
+      case compileRegex "(a|b|c)d" of
+        Right reg -> do
+          let outcome = runMatchWithMetrics reg ("cd" :: Text) Unlimited
+          case outcome.outcomeStatus of
+            Matched res -> do
+              res.matchedSlice `shouldBe` "cd"
+              outcome.outcomeMetrics.peakBacktrackDepth `shouldSatisfy` (>= 1)
+            _ -> expectationFailure "Expected Matched outcome"
+        Left e -> expectationFailure (show e)
+
+    it "tracks multi-byte UTF-8 bytes materialized correctly" $ do
+      case compileRegex "λ-calculus" of
+        Right reg -> do
+          let outcome = runMatchWithMetrics reg ("λ-calculus" :: Text) Unlimited
+          case outcome.outcomeStatus of
+            Matched res -> do
+              res.matchedSlice `shouldBe` "λ-calculus"
+              -- "λ-calculus" is 10 characters, but 11 UTF-8 bytes (λ is 2 bytes: 0xCE 0xBB)
+              outcome.outcomeMetrics.unitsScanned `shouldBe` 10
+              outcome.outcomeMetrics.utf8BytesMaterialized `shouldBe` 11
+            _ -> expectationFailure "Expected Matched outcome"
+        Left e -> expectationFailure (show e)
+
+    it "records remaining fuel and active thread count on OutOfFuel suspension" $ do
+      case compileRegex "(a+)+b" of
+        Right redosReg -> do
+          let outcome = runMatchWithMetrics redosReg ("aaaaaaaaaaaaaaac" :: Text) (StepBudget 40)
+          case outcome.outcomeStatus of
+            OutOfFuel cont -> do
+              outcome.outcomeMetrics.stepsConsumed `shouldSatisfy` (>= 40)
+              outcome.outcomeMetrics.fuelRemaining `shouldBe` StepBudget 0
+              outcome.outcomeMetrics.activeThreadCount `shouldSatisfy` (>= 1)
+              cont.currentSteps `shouldSatisfy` (>= 40)
+            _ -> expectationFailure "Expected OutOfFuel outcome"
+        Left e -> expectationFailure (show e)
+
+  describe "SuspendedCallout Interception & Resumption Decisions" $ do
+    it "yields SuspendedCallout with payload and resumes with ProceedMatch" $ do
+      case compileRegex "(?C42\"tag1\")hello" of
+        Right reg -> do
+          let outcome = runMatchWithMetrics reg ("hello world" :: Text) Unlimited
+          case outcome.outcomeStatus of
+            SuspendedCallout payload resume -> do
+              payload.calloutNumber `shouldBe` 42
+              payload.calloutTag `shouldBe` Just "tag1"
+              payload.calloutPosition `shouldBe` 0
+              payload.calloutMatchStart `shouldBe` 0
+              payload.calloutSubject `shouldBe` "hello world"
+              outcome.outcomeMetrics.activeThreadCount `shouldSatisfy` (>= 1)
+              -- Resume with ProceedMatch
+              let resumed = resumeMatchWithMetrics (resume ProceedMatch) Unlimited
+              case resumed.outcomeStatus of
+                Matched res -> res.matchedSlice `shouldBe` "hello"
+                _ -> expectationFailure "Expected match upon ProceedMatch"
+            _ -> expectationFailure "Expected SuspendedCallout"
+        Left e -> expectationFailure (show e)
+
+    it "forces backtrack to alternate branch upon ForceBacktrack decision" $ do
+      case compileRegex "(?C1\"first\")foo|bar" of
+        Right reg -> do
+          let outcome = runMatchWithMetrics reg ("bar" :: Text) Unlimited
+          case outcome.outcomeStatus of
+            SuspendedCallout payload resume -> do
+              payload.calloutNumber `shouldBe` 1
+              payload.calloutTag `shouldBe` Just "first"
+              -- Reject "foo" branch via ForceBacktrack: should backtrack and take "bar" branch!
+              let resumed = resumeMatchWithMetrics (resume ForceBacktrack) Unlimited
+              case resumed.outcomeStatus of
+                Matched res -> res.matchedSlice `shouldBe` "bar"
+                _ -> expectationFailure "Expected match on 'bar' after ForceBacktrack"
+            _ -> expectationFailure "Expected SuspendedCallout on branch 1"
+        Left e -> expectationFailure (show e)
+
+    it "aborts evaluation immediately upon AbortEvaluation decision" $ do
+      case compileRegex "(?C99)hello" of
+        Right reg -> do
+          let outcome = runMatchWithMetrics reg ("hello" :: Text) Unlimited
+          case outcome.outcomeStatus of
+            SuspendedCallout _ resume -> do
+              let aborted = resumeMatchWithMetrics (resume AbortEvaluation) Unlimited
+              aborted.outcomeStatus `shouldBe` NoMatch
+            _ -> expectationFailure "Expected SuspendedCallout"
+        Left e -> expectationFailure (show e)
+
+  describe "Pre-Allocated VMFrame & VMFramePool" $ do
+    it "round-trips ThreadState to VMFrame and back" $ do
+      let th = ThreadState 5 12 (emptyCaptureSlots 3)
+          fr = threadToFrame th
+      fr.framePc `shouldBe` 5
+      fr.frameStrIdx `shouldBe` 12
+      let th' = frameToThread fr
+      th'.pc `shouldBe` 5
+      th'.strIdx `shouldBe` 12
+
+    it "packs and reads frames from pre-allocated VMFramePool" $ do
+      let th1 = ThreadState 1 10 (emptyCaptureSlots 2)
+          th2 = ThreadState 2 20 (emptyCaptureSlots 2)
+          pool = threadsToFramePool [th1, th2]
+          fr0 = readFrame pool 0
+          fr1 = readFrame pool 1
+      fr0.framePc `shouldBe` 1
+      fr0.frameStrIdx `shouldBe` 10
+      fr1.framePc `shouldBe` 2
+      fr1.frameStrIdx `shouldBe` 20
+      let recovered = framePoolToThreads pool 2
+      map (\t -> (t.pc, t.strIdx)) recovered `shouldBe` [(1, 10), (2, 20)]

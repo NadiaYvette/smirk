@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# OPTIONS_GHC -Wno-pattern-namespace-specifier #-}
 
 {- |
 Module      : Smirk.Core.Bytecode
@@ -16,8 +17,8 @@ callout hooks ('OpCallout' / 'ICallout').
 -}
 module Smirk.Core.Bytecode
   ( Opcode (..)
-  , data IRangeNat
-  , data ICallout
+  , pattern IRangeNat
+  , pattern ICallout
   , Program
   , Regex (..)
   ) where

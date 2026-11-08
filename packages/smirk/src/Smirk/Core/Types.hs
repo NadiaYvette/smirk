@@ -57,14 +57,34 @@ module Smirk.Core.Types
     -- * Fuel & Budgeting
   , Fuel (..)
 
-    -- * Match Execution Modes & Outcomes
+    -- * Multi-Resource Step Metrics & Execution Outcomes
+  , StepMetrics (..)
+  , emptyStepMetrics
+  , MatchOutcome (..)
+  , mkMatchOutcome
+  , outcomeToStatus
+  , outcomeToMaybeResult
+
+    -- * PCRE Callouts
+  , CalloutDecision (..)
+  , CalloutPayload (..)
+
+    -- * Match Execution Modes & Continuations
   , MatchMode (..)
   , MatchResult (..)
   , MatchStatus (..)
   , MatchContinuation (..)
 
-    -- * VM Execution State
+    -- * VM Execution State & Pre-Allocated Frames
   , ThreadState (..)
+  , VMFrame (..)
+  , threadToFrame
+  , frameToThread
+  , VMFramePool (..)
+  , emptyVMFramePool
+  , readFrame
+  , threadsToFramePool
+  , framePoolToThreads
   ) where
 
 import Control.Monad (forM_)
@@ -301,9 +321,196 @@ data MatchContinuation s = MatchContinuation
   , currentSteps     :: !Int            -- ^ Total steps executed up to suspension
   } deriving stock (Eq, Show, Generic)
 
+-- | Decision passed by a callout hook to resume VM evaluation.
+data CalloutDecision
+  = ProceedMatch      -- ^ Accept callout and proceed matching (advancing pc)
+  | ForceBacktrack    -- ^ Reject callout and trigger backtracking to next branch
+  | AbortEvaluation   -- ^ Abort regex evaluation immediately with NoMatch
+  deriving stock (Eq, Show, Generic)
+
+-- | Inspection payload passed to PCRE callout handlers.
+data CalloutPayload s = CalloutPayload
+  { calloutNumber     :: !Int          -- ^ PCRE callout identifier (0 for (?C), n for (?Cn))
+  , calloutTag        :: !(Maybe Text) -- ^ Optional string tag from (?C"tag") or (?C'tag')
+  , calloutPosition   :: !Int          -- ^ Current 0-based character offset in target
+  , calloutMatchStart :: !Int          -- ^ 0-based character offset where current match began
+  , calloutCaptures   :: !CaptureSlots -- ^ Current snapshot of capture group registers
+  , calloutSubject    :: !s            -- ^ Entire target sequence being searched
+  } deriving stock (Eq, Show, Generic)
+
+{- Note [PCRE Callout Resumption and Continuation Hooks]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[tag:note-pcre-callout-resumption]
+PCRE callouts ((?C), (?Cn), (?C"tag")) provide deterministic hooks into the
+regular expression search process. Smirk models callouts as first-class suspended
+continuations: when the engine hits 'OpCallout', it yields 'SuspendedCallout' containing
+the inspection payload and a continuation function '(CalloutDecision -> MatchContinuation s)'.
+
+The host application can inspect target offsets, capture registers, and tags, then choose:
+1. 'ProceedMatch': increment the program counter past the callout and continue.
+2. 'ForceBacktrack': fail the current branch and pop the next backtrack thread.
+3. 'AbortEvaluation': terminate the search immediately with 'NoMatch'.
+-}
+
 -- | Verdict of a matching operation.
 data MatchStatus s
   = Matched !(MatchResult s)            -- ^ A match was successfully found
   | NoMatch                             -- ^ The pattern does not match the target
   | OutOfFuel !(MatchContinuation s)    -- ^ Fuel budget exhausted; resumable
-  deriving stock (Eq, Show, Generic)
+  | SuspendedCallout !(CalloutPayload s) !(CalloutDecision -> MatchContinuation s)
+  deriving stock Generic
+
+instance Eq s => Eq (MatchStatus s) where
+  Matched r1 == Matched r2 = r1 == r2
+  NoMatch == NoMatch = True
+  OutOfFuel c1 == OutOfFuel c2 = c1 == c2
+  SuspendedCallout p1 _ == SuspendedCallout p2 _ = p1 == p2
+  _ == _ = False
+
+instance Show s => Show (MatchStatus s) where
+  showsPrec p = \case
+    Matched r -> showParen (p > 10) $ showString "Matched " . showsPrec 11 r
+    NoMatch -> showString "NoMatch"
+    OutOfFuel c -> showParen (p > 10) $ showString "OutOfFuel " . showsPrec 11 c
+    SuspendedCallout payload _ ->
+      showParen (p > 10) $ showString "SuspendedCallout " . showsPrec 11 payload . showString " <continuation>"
+
+{- Note [Multi-Resource Step Metrics]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[tag:note-step-metrics-multi-resource]
+Rather than tracking only a scalar step counter, Smirk monitors multiple physical
+execution dimensions to ensure ReDoS protection, memory accounting, and streaming telemetry:
+* 'stepsConsumed': Total bytecode instruction steps executed.
+* 'fuelRemaining': Remaining fuel budget (StepBudget or Unlimited).
+* 'unitsScanned': Highest character position accessed in target input sequence.
+* 'utf8BytesMaterialized': UTF-8 byte representation width of the scanned prefix.
+* 'peakBacktrackDepth': Maximum depth attained by the backtracking stack.
+* 'activeThreadCount': Number of live/pending threads at outcome suspension or termination.
+-}
+
+-- | Multi-resource execution metrics tracked during VM evaluation.
+data StepMetrics = StepMetrics
+  { stepsConsumed         :: !Int   -- ^ Total VM instruction transitions executed
+  , fuelRemaining         :: !Fuel  -- ^ Remaining fuel budget
+  , unitsScanned          :: !Int   -- ^ Maximum target units (characters) scanned
+  , utf8BytesMaterialized :: !Int   -- ^ UTF-8 bytes represented by the scanned units
+  , peakBacktrackDepth    :: !Int   -- ^ Maximum depth of the backtrack stack observed
+  , activeThreadCount     :: !Int   -- ^ Number of active or pending threads at termination/suspension
+  } deriving stock (Eq, Show, Generic)
+
+-- | Initial zeroed 'StepMetrics' for a fresh execution run.
+emptyStepMetrics :: Fuel -> StepMetrics
+emptyStepMetrics fuel = StepMetrics
+  { stepsConsumed         = 0
+  , fuelRemaining         = fuel
+  , unitsScanned          = 0
+  , utf8BytesMaterialized = 0
+  , peakBacktrackDepth    = 0
+  , activeThreadCount     = 1
+  }
+
+-- | Complete match outcome pairing verdict with multi-resource metrics.
+data MatchOutcome s = MatchOutcome
+  { outcomeStatus  :: !(MatchStatus s)
+  , outcomeMetrics :: !StepMetrics
+  } deriving stock (Eq, Show, Generic)
+
+-- | Construct a 'MatchOutcome' from a 'MatchStatus' and 'StepMetrics'.
+mkMatchOutcome :: MatchStatus s -> StepMetrics -> MatchOutcome s
+mkMatchOutcome = MatchOutcome
+
+-- | Extract the 'MatchStatus' from an outcome.
+outcomeToStatus :: MatchOutcome s -> MatchStatus s
+outcomeToStatus = outcomeStatus
+
+-- | Extract a 'MatchResult' if the outcome was successful.
+outcomeToMaybeResult :: MatchOutcome s -> Maybe (MatchResult s)
+outcomeToMaybeResult outcome = case outcome.outcomeStatus of
+  Matched res -> Just res
+  _           -> Nothing
+
+{- Note [Pre-Allocated VM Frames and Thread Pools]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[tag:note-preallocated-vm-frames]
+In the Pike VM, backtrack branches represent alternative execution paths.
+'VMFrame' packages the unboxed program counter and string index with flat 'CaptureSlots',
+avoiding intermediate tuple allocations.
+'VMFramePool' provides a flat, pre-allocated array buffer backed by 'PrimArray Int'
+and 'SmallArray CaptureSlots' for high-throughput thread pool operations.
+-}
+
+-- | Pre-allocated frame representation for thread pool states.
+-- Stores program counter, string index, and capture registers.
+data VMFrame = VMFrame
+  { framePc       :: {-# UNPACK #-} !Int
+  , frameStrIdx   :: {-# UNPACK #-} !Int
+  , frameCaptures :: !CaptureSlots
+  } deriving stock (Eq, Show, Generic)
+
+-- | Convert a 'ThreadState' to a 'VMFrame'.
+threadToFrame :: ThreadState -> VMFrame
+threadToFrame th = VMFrame th.pc th.strIdx th.saves
+
+-- | Convert a 'VMFrame' back to a 'ThreadState'.
+frameToThread :: VMFrame -> ThreadState
+frameToThread fr = ThreadState fr.framePc fr.frameStrIdx fr.frameCaptures
+
+-- | Pre-allocated thread pool frame buffer for backtrack branches.
+-- Uses unboxed 'PrimArray Int' for (pc, strIdx) pairs and 'SmallArray CaptureSlots'.
+data VMFramePool = VMFramePool
+  { poolPcs      :: !(PrimArray Int)
+  , poolStrIdxs  :: !(PrimArray Int)
+  , poolCaptures :: !(SmallArray CaptureSlots)
+  , poolCapacity :: {-# UNPACK #-} !Int
+  } deriving stock (Eq, Show, Generic)
+
+-- | Initialize a pre-allocated 'VMFramePool' with the given capacity.
+emptyVMFramePool :: Int -> VMFramePool
+emptyVMFramePool cap =
+  let safeCap = max 1 cap
+      pcs = runST $ do
+        m <- newPrimArray safeCap
+        setPrimArray m 0 safeCap (-1)
+        unsafeFreezePrimArray m
+      strIdxs = runST $ do
+        m <- newPrimArray safeCap
+        setPrimArray m 0 safeCap 0
+        unsafeFreezePrimArray m
+      caps = runSmallArray (newSmallArray safeCap (emptyCaptureSlots 0))
+  in VMFramePool pcs strIdxs caps safeCap
+
+-- | Read a frame from the frame pool at the given index.
+readFrame :: VMFramePool -> Int -> VMFrame
+readFrame pool idx =
+  VMFrame
+    (indexPrimArray pool.poolPcs idx)
+    (indexPrimArray pool.poolStrIdxs idx)
+    (indexSmallArray pool.poolCaptures idx)
+
+-- | Convert a list of 'ThreadState' frames into a pre-allocated 'VMFramePool'.
+threadsToFramePool :: [ThreadState] -> VMFramePool
+threadsToFramePool ths =
+  let len = length ths
+      cap = max 16 len
+      pcs = runST $ do
+        m <- newPrimArray cap
+        setPrimArray m 0 cap (-1)
+        forM_ (zip [0..] ths) $ \(i, th) -> writePrimArray m i th.pc
+        unsafeFreezePrimArray m
+      strIdxs = runST $ do
+        m <- newPrimArray cap
+        setPrimArray m 0 cap 0
+        forM_ (zip [0..] ths) $ \(i, th) -> writePrimArray m i th.strIdx
+        unsafeFreezePrimArray m
+      caps = runSmallArray $ do
+        m <- newSmallArray cap (emptyCaptureSlots 0)
+        forM_ (zip [0..] ths) $ \(i, th) -> writeSmallArray m i th.saves
+        pure m
+  in VMFramePool pcs strIdxs caps cap
+
+-- | Extract active 'ThreadState' list from a 'VMFramePool' up to depth.
+framePoolToThreads :: VMFramePool -> Int -> [ThreadState]
+framePoolToThreads pool depth =
+  [ frameToThread (readFrame pool i)
+  | i <- [0 .. depth - 1]
+  ]

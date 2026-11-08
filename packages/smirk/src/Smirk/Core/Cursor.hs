@@ -81,33 +81,14 @@ import Unsafe.Coerce (unsafeCoerce)
 import Smirk.Core.Types
   ( Fuel (..)
   , MatchContinuation (..)
-  , MatchResult (..)
-  , MatchStatus (..)
+  , MatchOutcome (..)
   , ThreadState (..)
+  , mkMatchOutcome
+  , outcomeToMaybeResult
+  , outcomeToStatus
   )
 import Smirk.Engine.Sequence (RegexTarget (..))
-import Smirk.Engine.VM (resumeMatch)
-
--- | Execution outcome produced by resuming or executing a match.
--- In TP-SMIRK-002C, this encapsulates the 'MatchStatus s'.
--- In TP-SMIRK-002E, this expands to track multi-resource 'StepMetrics'.
-newtype MatchOutcome s = MatchOutcome
-  { outcomeStatus :: MatchStatus s
-  } deriving stock (Eq, Show, Generic)
-
--- | Construct a 'MatchOutcome' from a 'MatchStatus'.
-mkMatchOutcome :: MatchStatus s -> MatchOutcome s
-mkMatchOutcome = MatchOutcome
-
--- | Extract the 'MatchStatus' from an outcome.
-outcomeToStatus :: MatchOutcome s -> MatchStatus s
-outcomeToStatus = outcomeStatus
-
--- | Extract a successful 'MatchResult', if the outcome was 'Matched'.
-outcomeToMaybeResult :: MatchOutcome s -> Maybe (MatchResult s)
-outcomeToMaybeResult outcome = case outcome.outcomeStatus of
-  Matched res -> Just res
-  _           -> Nothing
+import Smirk.Engine.VM (resumeMatchWithMetrics)
 
 -- | Top-level linear continuation executor function.
 --
@@ -116,7 +97,7 @@ outcomeToMaybeResult outcome = case outcome.outcomeStatus of
 --
 -- [ref:note-linear-continuation-discipline]
 resumeLinear :: RegexTarget s => MatchContinuation s %1 -> Fuel -> MatchOutcome s
-resumeLinear = toLinear (\cont fuel -> MatchOutcome (resumeMatch cont fuel))
+resumeLinear = toLinear resumeMatchWithMetrics
   where
     toLinear :: (MatchContinuation s -> Fuel -> MatchOutcome s)
              -> (MatchContinuation s %1 -> Fuel -> MatchOutcome s)

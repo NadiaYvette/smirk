@@ -32,10 +32,29 @@ module Smirk.Engine.VM
   , MatchStatus (..)
   , MatchContinuation (..)
 
+    -- * Multi-Resource Step Metrics & Match Outcomes
+  , StepMetrics (..)
+  , emptyStepMetrics
+  , MatchOutcome (..)
+  , mkMatchOutcome
+  , outcomeToStatus
+  , outcomeToMaybeResult
+
+    -- * PCRE Callouts
+  , CalloutDecision (..)
+  , CalloutPayload (..)
+
     -- * Execution Modes
   , MatchMode (..)
 
-    -- * Execution Entry Points
+    -- * Execution Entry Points with Multi-Resource Metrics
+  , runMatchWithMetrics
+  , runMatchWithMetricsAt
+  , runMatchWithMetricsWithMode
+  , runMatchWithMetricsAtWithMode
+  , resumeMatchWithMetrics
+
+    -- * Backwards-Compatible Execution Entry Points
   , runMatch
   , runMatchAt
   , runMatchWithMode
@@ -46,9 +65,18 @@ module Smirk.Engine.VM
   , findAllMatches
   , findAllMatchesWithMode
   , findAllMatchesNotEmpty
+  , runAutoProceed
 
-    -- * Internal VM Engine & Capture Registers
+    -- * Internal VM Engine & Pre-Allocated Frames
   , ThreadState (..)
+  , VMFrame (..)
+  , threadToFrame
+  , frameToThread
+  , VMFramePool (..)
+  , emptyVMFramePool
+  , readFrame
+  , threadsToFramePool
+  , framePoolToThreads
   , CaptureSlots (..)
   , emptyCaptureSlots
   , getCaptureStart
@@ -61,9 +89,11 @@ module Smirk.Engine.VM
   , toNamedCaptureSmallArray
   , toNamedCaptureRep
   , matchNamedCaptureRep
-  , lookupNamedCaptureRep
   , stepVM
   , stepVMWithMode
+  , stepVMWithMetrics
+  , backtrackOrNextStart
+  , backtrackOrNextStartWithMetrics
   , scanWord64
   , matchClass
   , matchAnchor
@@ -77,21 +107,37 @@ import Data.Word (Word64)
 import Smirk.Core.AST (Anchor (..), CharClass (..), CharRange (..))
 import Smirk.Core.Bytecode (Opcode (..), Regex (..))
 import Smirk.Core.Types
-  ( CaptureSlots (..)
+  ( CalloutDecision (..)
+  , CalloutPayload (..)
+  , CaptureSlots (..)
   , Fuel (..)
   , MatchContinuation (..)
   , MatchMode (..)
+  , MatchOutcome (..)
   , MatchResult (..)
   , MatchStatus (..)
+  , StepMetrics (..)
   , ThreadState (..)
+  , VMFrame (..)
+  , VMFramePool (..)
   , emptyCaptureSlots
+  , emptyStepMetrics
+  , emptyVMFramePool
+  , framePoolToThreads
+  , frameToThread
   , getCaptureEnd
   , getCaptureSpan
   , getCaptureStart
   , lookupNamedCaptureRep
   , matchNamedCaptureRep
+  , mkMatchOutcome
+  , outcomeToMaybeResult
+  , outcomeToStatus
+  , readFrame
   , setCaptureEnd
   , setCaptureStart
+  , threadToFrame
+  , threadsToFramePool
   , toCaptureMap
   , toFullMatchSpan
   , toNamedCaptureRep
@@ -131,27 +177,99 @@ To neutralize this threat, Smirk introduces the 'Fuel' budget:
     fuel to resume via 'resumeMatch'.
 -}
 
+-- | Context tracking step counts and physical resource dimensions during matching.
+data VMContext = VMContext
+  { vmStepsConsumed :: {-# UNPACK #-} !Int
+  , vmUnitsScanned  :: {-# UNPACK #-} !Int
+  , vmPeakDepth     :: {-# UNPACK #-} !Int
+  } deriving stock (Eq, Show)
+
+-- | Construct 'StepMetrics' snapshot from 'VMContext' and fuel budget.
+buildStepMetrics
+  :: RegexTarget s
+  => Fuel
+  -> s
+  -> VMContext
+  -> Int        -- ^ Number of active/pending threads
+  -> StepMetrics
+buildStepMetrics fuel target ctx activeThreads =
+  let remFuel = case fuel of
+        Unlimited    -> Unlimited
+        StepBudget b -> StepBudget (max 0 (b - ctx.vmStepsConsumed))
+      scanned = ctx.vmUnitsScanned
+      bytes = utf8SliceByteWidth 0 scanned target
+  in StepMetrics
+    { stepsConsumed         = ctx.vmStepsConsumed
+    , fuelRemaining         = remFuel
+    , unitsScanned          = scanned
+    , utf8BytesMaterialized = bytes
+    , peakBacktrackDepth    = ctx.vmPeakDepth
+    , activeThreadCount     = activeThreads
+    }
+
+-- | Execute regex search across a sequence starting from index 0 returning multi-resource 'StepMetrics'.
+runMatchWithMetrics :: RegexTarget s => Regex -> s -> Fuel -> MatchOutcome s
+runMatchWithMetrics = runMatchWithMetricsWithMode MatchStandard
+
+-- | Execute regex search starting from a specific character offset returning multi-resource 'StepMetrics'.
+runMatchWithMetricsAt :: RegexTarget s => Regex -> s -> Int -> Fuel -> MatchOutcome s
+runMatchWithMetricsAt = runMatchWithMetricsAtWithMode MatchStandard
+
+-- | Execute regex search across a sequence under an explicit 'MatchMode' returning multi-resource 'StepMetrics'.
+runMatchWithMetricsWithMode :: RegexTarget s => MatchMode -> Regex -> s -> Fuel -> MatchOutcome s
+runMatchWithMetricsWithMode mode regex target = runMatchWithMetricsAtWithMode mode regex target 0
+
+-- | Execute regex search starting from a specific offset under an explicit 'MatchMode' returning 'StepMetrics'.
+runMatchWithMetricsAtWithMode :: RegexTarget s => MatchMode -> Regex -> s -> Int -> Fuel -> MatchOutcome s
+runMatchWithMetricsAtWithMode mode regex target startIdx fuel =
+  let len = seqLength target
+  in if startIdx > len
+       then MatchOutcome NoMatch (emptyStepMetrics fuel)
+       else
+         let initialThread = ThreadState 0 startIdx (emptyCaptureSlots (regex.maxGroupIndex + 1))
+             ctx = VMContext 0 startIdx 0
+         in stepVMWithMetrics mode regex target startIdx initialThread [] ctx fuel
+
+-- | Resume a previously suspended match with additional fuel, returning multi-resource 'StepMetrics'.
+resumeMatchWithMetrics :: RegexTarget s => MatchContinuation s -> Fuel -> MatchOutcome s
+resumeMatchWithMetrics cont fuel =
+  let ctx = VMContext
+        cont.currentSteps
+        (max cont.savedStartIndex cont.currentThread.strIdx)
+        (length cont.backtrackStack)
+  in stepVMWithMetrics
+       cont.savedMatchMode
+       cont.savedRegex
+       cont.savedTarget
+       cont.savedStartIndex
+       cont.currentThread
+       cont.backtrackStack
+       ctx
+       fuel
+
 -- | Execute regex search across a sequence starting from index 0 using standard matching.
 runMatch :: RegexTarget s => Regex -> s -> Fuel -> MatchStatus s
-runMatch = runMatchWithMode MatchStandard
+runMatch reg target fuel = (runMatchWithMetrics reg target fuel).outcomeStatus
 
 -- | Execute regex search starting from a specific character offset using standard matching.
 runMatchAt :: RegexTarget s => Regex -> s -> Int -> Fuel -> MatchStatus s
-runMatchAt = runMatchAtWithMode MatchStandard
+runMatchAt reg target startIdx fuel = (runMatchWithMetricsAt reg target startIdx fuel).outcomeStatus
 
 -- | Execute regex search across a sequence under an explicit 'MatchMode'.
 runMatchWithMode :: RegexTarget s => MatchMode -> Regex -> s -> Fuel -> MatchStatus s
-runMatchWithMode mode regex target = runMatchAtWithMode mode regex target 0
+runMatchWithMode mode regex target fuel = (runMatchWithMetricsWithMode mode regex target fuel).outcomeStatus
 
 -- | Execute regex search starting from a specific character offset under an explicit 'MatchMode'.
 runMatchAtWithMode :: RegexTarget s => MatchMode -> Regex -> s -> Int -> Fuel -> MatchStatus s
-runMatchAtWithMode mode regex target startIdx fuel =
-  let len = seqLength target
-  in if startIdx > len
-       then NoMatch
-       else
-         let initialThread = ThreadState 0 startIdx (emptyCaptureSlots (regex.maxGroupIndex + 1))
-         in stepVMWithMode mode regex target startIdx initialThread [] 0 fuel
+runMatchAtWithMode mode regex target startIdx fuel = (runMatchWithMetricsAtWithMode mode regex target startIdx fuel).outcomeStatus
+
+-- | Repeatedly resolve 'SuspendedCallout' hooks with 'ProceedMatch' until
+-- achieving a definitive match verdict ('Matched' or 'NoMatch' / 'OutOfFuel').
+runAutoProceed :: RegexTarget s => MatchStatus s -> Maybe (MatchResult s)
+runAutoProceed = \case
+  Matched res -> Just res
+  SuspendedCallout _ resume -> runAutoProceed (resumeMatch (resume ProceedMatch) Unlimited)
+  _ -> Nothing
 
 -- | Execute regex search enforcing 'MatchNotEmpty' (PCRE2_NOTEMPTY semantics: rejects empty matches).
 runMatchNotEmpty :: RegexTarget s => Regex -> s -> Fuel -> MatchStatus s
@@ -159,21 +277,11 @@ runMatchNotEmpty = runMatchWithMode MatchNotEmpty
 
 -- | Execute non-empty regex search returning the first non-empty match, if any.
 execMatchNotEmpty :: RegexTarget s => Regex -> s -> Maybe (MatchResult s)
-execMatchNotEmpty reg target = case runMatchNotEmpty reg target Unlimited of
-  Matched res -> Just res
-  _           -> Nothing
+execMatchNotEmpty reg target = runAutoProceed (runMatchNotEmpty reg target Unlimited)
 
 -- | Resume a previously suspended match with additional fuel, preserving its 'MatchMode'.
 resumeMatch :: RegexTarget s => MatchContinuation s -> Fuel -> MatchStatus s
-resumeMatch cont =
-  stepVMWithMode
-    cont.savedMatchMode
-    cont.savedRegex
-    cont.savedTarget
-    cont.savedStartIndex
-    cont.currentThread
-    cont.backtrackStack
-    cont.currentSteps
+resumeMatch cont fuel = (resumeMatchWithMetrics cont fuel).outcomeStatus
 
 -- | Find all non-overlapping matches across the target sequence in standard matching mode.
 findAllMatches :: RegexTarget s => Regex -> s -> [MatchResult s]
@@ -185,11 +293,11 @@ findAllMatchesWithMode mode regex target = go 0
   where
     go off
       | off > seqLength target = []
-      | otherwise = case runMatchAtWithMode mode regex target off Unlimited of
-          Matched res ->
+      | otherwise = case runAutoProceed (runMatchAtWithMode mode regex target off Unlimited) of
+          Just res ->
             let nextOff = max (off + 1) (res.matchOffset + res.matchLength)
             in res : go nextOff
-          _ -> []
+          Nothing -> []
 
 -- | Find all non-overlapping matches enforcing non-empty match lengths (matchLength >= 1).
 findAllMatchesNotEmpty :: RegexTarget s => Regex -> s -> [MatchResult s]
@@ -209,7 +317,6 @@ stepVM
 stepVM = stepVMWithMode MatchStandard
 
 -- | Core backtracking execution step loop under an explicit 'MatchMode'.
--- Evaluates one instruction and advances the thread or backtracks to an alternate branch.
 stepVMWithMode
   :: RegexTarget s
   => MatchMode         -- ^ Execution mode (standard or non-empty)
@@ -222,64 +329,93 @@ stepVMWithMode
   -> Fuel              -- ^ Fuel limit
   -> MatchStatus s
 stepVMWithMode mode regex target startIdx th stack steps fuel =
+  let ctx = VMContext steps (max startIdx th.strIdx) (length stack)
+      outcome = stepVMWithMetrics mode regex target startIdx th stack ctx fuel
+  in outcome.outcomeStatus
+
+-- | Core multi-resource step loop.
+-- Evaluates one instruction and advances the thread or backtracks to an alternate branch.
+stepVMWithMetrics
+  :: RegexTarget s
+  => MatchMode
+  -> Regex
+  -> s
+  -> Int               -- ^ Outer loop start index
+  -> ThreadState       -- ^ Current active thread
+  -> [ThreadState]     -- ^ Backtrack stack
+  -> VMContext         -- ^ Step metrics accumulator
+  -> Fuel              -- ^ Fuel limit
+  -> MatchOutcome s
+stepVMWithMetrics mode regex target startIdx th stack ctx fuel =
   case fuel of
-    StepBudget budget | steps >= budget ->
-      OutOfFuel MatchContinuation
-        { savedMatchMode  = mode
-        , savedRegex      = regex
-        , savedTarget     = target
-        , savedStartIndex = startIdx
-        , currentThread   = th
-        , backtrackStack  = stack
-        , currentSteps    = steps
-        }
+    StepBudget budget | ctx.vmStepsConsumed >= budget ->
+      let metrics = buildStepMetrics fuel target ctx (1 + length stack)
+          cont = MatchContinuation
+            { savedMatchMode  = mode
+            , savedRegex      = regex
+            , savedTarget     = target
+            , savedStartIndex = startIdx
+            , currentThread   = th
+            , backtrackStack  = stack
+            , currentSteps    = ctx.vmStepsConsumed
+            }
+      in MatchOutcome (OutOfFuel cont) metrics
     _ ->
-      let prog = regex.program
+      let !steps' = ctx.vmStepsConsumed + 1
+          !units' = max ctx.vmUnitsScanned th.strIdx
+          !depth' = max ctx.vmPeakDepth (length stack)
+          !ctx' = VMContext steps' units' depth'
+          prog = regex.program
           pc' = th.pc
       in if pc' < 0 || pc' >= V.length prog
-           then backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+           then backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
            else case prog V.! pc' of
              OpChar expected ->
                case seqIndex target th.strIdx of
                  Just c | c == expected ->
-                   stepVMWithMode mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + 1 } stack (steps + 1) fuel
-                 _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                   let !unitsScanned' = max units' (th.strIdx + 1)
+                   in stepVMWithMetrics mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + 1 } stack ctx' { vmUnitsScanned = unitsScanned' } fuel
+                 _ -> backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
 
              OpClass cls ->
                case seqIndex target th.strIdx of
                  Just c | matchClass cls c ->
-                   stepVMWithMode mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + 1 } stack (steps + 1) fuel
-                 _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                   let !unitsScanned' = max units' (th.strIdx + 1)
+                   in stepVMWithMetrics mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + 1 } stack ctx' { vmUnitsScanned = unitsScanned' } fuel
+                 _ -> backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
 
              OpAnchor anchor ->
                if matchAnchor anchor th.strIdx target
-                 then stepVMWithMode mode regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
-                 else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                 then stepVMWithMetrics mode regex target startIdx th { pc = pc' + 1 } stack ctx' fuel
+                 else backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
 
              OpSplit d1 d2 ->
                let branch2 = th { pc = pc' + d2 }
                    branch1 = th { pc = pc' + d1 }
-               in stepVMWithMode mode regex target startIdx branch1 (branch2 : stack) (steps + 1) fuel
+                   !depthAfterSplit = max depth' (1 + length stack)
+                   !ctxSplit = ctx' { vmPeakDepth = depthAfterSplit }
+               in stepVMWithMetrics mode regex target startIdx branch1 (branch2 : stack) ctxSplit fuel
 
              OpJump d ->
-               stepVMWithMode mode regex target startIdx th { pc = pc' + d } stack (steps + 1) fuel
+               stepVMWithMetrics mode regex target startIdx th { pc = pc' + d } stack ctx' fuel
 
              OpSaveStart idx ->
                let !saves' = setCaptureStart idx th.strIdx th.saves
-               in stepVMWithMode mode regex target startIdx th { pc = pc' + 1, saves = saves' } stack (steps + 1) fuel
+               in stepVMWithMetrics mode regex target startIdx th { pc = pc' + 1, saves = saves' } stack ctx' fuel
 
              OpSaveEnd idx ->
                let !saves' = setCaptureEnd idx th.strIdx th.saves
-               in stepVMWithMode mode regex target startIdx th { pc = pc' + 1, saves = saves' } stack (steps + 1) fuel
+               in stepVMWithMetrics mode regex target startIdx th { pc = pc' + 1, saves = saves' } stack ctx' fuel
 
              OpAssertLookahead subProg isPos ->
                let subRegex = regex { program = subProg }
-                   subMatched = case runMatchAtWithMode MatchStandard subRegex target th.strIdx (StepBudget 1000) of
+                   subOutcome = runMatchAtWithMode MatchStandard subRegex target th.strIdx (StepBudget 1000)
+                   subMatched = case subOutcome of
                      Matched _ -> True
                      _         -> False
                in if subMatched == isPos
-                    then stepVMWithMode mode regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
-                    else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                    then stepVMWithMetrics mode regex target startIdx th { pc = pc' + 1 } stack ctx' fuel
+                    else backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
 
              OpAssertLookbehind subProg isPos ->
                let subRegex = regex { program = subProg }
@@ -289,8 +425,8 @@ stepVMWithMode mode regex target startIdx th stack steps fuel =
                        _           -> False
                      ) [max 0 (th.strIdx - 20) .. th.strIdx]
                in if subMatched == isPos
-                    then stepVMWithMode mode regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
-                    else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                    then stepVMWithMetrics mode regex target startIdx th { pc = pc' + 1 } stack ctx' fuel
+                    else backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
 
              OpMatchBackRef idx ->
                case getCaptureSpan idx th.saves of
@@ -298,29 +434,86 @@ stepVMWithMode mode regex target startIdx th stack steps fuel =
                    let refLen = en - st
                        refSlice = seqSlice st refLen target
                        targetSlice = seqSlice th.strIdx refLen target
+                       !unitsScanned' = max units' (th.strIdx + refLen)
                    in if seqToText refSlice == seqToText targetSlice
-                        then stepVMWithMode mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + refLen } stack (steps + 1) fuel
-                        else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
-                 _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                        then stepVMWithMetrics mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + refLen } stack ctx' { vmUnitsScanned = unitsScanned' } fuel
+                        else backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
+                 _ -> backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
 
              OpRangeNat minVal maxVal ->
                case scanWord64 target th.strIdx of
                  (Just val, !len) | val >= minVal && val <= maxVal ->
-                   stepVMWithMode mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + len } stack (steps + 1) fuel
-                 _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                   let !unitsScanned' = max units' (th.strIdx + len)
+                   in stepVMWithMetrics mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + len } stack ctx' { vmUnitsScanned = unitsScanned' } fuel
+                 _ -> backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
 
-             OpCallout _num _tag ->
-               -- PCRE Callout: zero-width inspection hook [ref:note-pcre-callout-syntax]
-               stepVMWithMode mode regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
+             OpCallout num tag ->
+               -- PCRE Callout: construct inspection payload and resumption hook [ref:note-pcre-callout-resumption]
+               let payload = CalloutPayload
+                     { calloutNumber     = num
+                     , calloutTag        = tag
+                     , calloutPosition   = th.strIdx
+                     , calloutMatchStart = startIdx
+                     , calloutCaptures   = th.saves
+                     , calloutSubject    = target
+                     }
+                   resumeCont decision = case decision of
+                     ProceedMatch ->
+                       MatchContinuation
+                         { savedMatchMode   = mode
+                         , savedRegex       = regex
+                         , savedTarget      = target
+                         , savedStartIndex  = startIdx
+                         , currentThread    = th { pc = pc' + 1 }
+                         , backtrackStack   = stack
+                         , currentSteps     = steps'
+                         }
+                     ForceBacktrack ->
+                       case stack of
+                         (nextTh : rest) ->
+                           MatchContinuation
+                             { savedMatchMode   = mode
+                             , savedRegex       = regex
+                             , savedTarget      = target
+                             , savedStartIndex  = startIdx
+                             , currentThread    = nextTh
+                             , backtrackStack   = rest
+                             , currentSteps     = steps'
+                             }
+                         [] ->
+                           let nextStart = startIdx + 1
+                               freshTh = ThreadState 0 nextStart (emptyCaptureSlots (regex.maxGroupIndex + 1))
+                           in MatchContinuation
+                             { savedMatchMode   = mode
+                             , savedRegex       = regex
+                             , savedTarget      = target
+                             , savedStartIndex  = nextStart
+                             , currentThread    = freshTh
+                             , backtrackStack   = []
+                             , currentSteps     = steps'
+                             }
+                     AbortEvaluation ->
+                       MatchContinuation
+                         { savedMatchMode   = mode
+                         , savedRegex       = regex
+                         , savedTarget      = target
+                         , savedStartIndex  = seqLength target + 1
+                         , currentThread    = ThreadState (V.length prog + 1) (seqLength target + 1) (emptyCaptureSlots 0)
+                         , backtrackStack   = []
+                         , currentSteps     = steps'
+                         }
+                   metrics = buildStepMetrics fuel target ctx' (1 + length stack)
+               in MatchOutcome (SuspendedCallout payload resumeCont) metrics
 
              OpMatch ->
-               let res = buildResult regex target th (steps + 1)
+               let res = buildResult regex target th steps'
                in case mode of
                  MatchNotEmpty | res.matchLength == 0 ->
                    -- Reject empty match under PCRE2_NOTEMPTY semantics: backtrack!
-                   backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                   backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx' fuel
                  _ ->
-                   Matched res
+                   let metrics = buildStepMetrics fuel target ctx' 0
+                   in MatchOutcome (Matched res) metrics
 
 -- | Backtrack to next pending thread on stack, or advance outer search loop.
 backtrackOrNextStart
@@ -334,14 +527,32 @@ backtrackOrNextStart
   -> Fuel
   -> MatchStatus s
 backtrackOrNextStart mode regex target startIdx stack steps fuel =
+  let ctx = VMContext steps startIdx (length stack)
+      outcome = backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx fuel
+  in outcome.outcomeStatus
+
+-- | Backtrack to next pending thread on stack, or advance outer search loop with metrics.
+backtrackOrNextStartWithMetrics
+  :: RegexTarget s
+  => MatchMode
+  -> Regex
+  -> s
+  -> Int
+  -> [ThreadState]
+  -> VMContext
+  -> Fuel
+  -> MatchOutcome s
+backtrackOrNextStartWithMetrics mode regex target startIdx stack ctx fuel =
   case stack of
     (nextTh : rest) ->
-      stepVMWithMode mode regex target startIdx nextTh rest steps fuel
+      stepVMWithMetrics mode regex target startIdx nextTh rest ctx fuel
     [] ->
       case regex.program V.!? 0 of
         Just (OpSaveStart 0) ->
           case regex.program V.!? 1 of
-            Just (OpAnchor AnchorStart) -> NoMatch
+            Just (OpAnchor AnchorStart) ->
+              let metrics = buildStepMetrics fuel target ctx 0
+              in MatchOutcome NoMatch metrics
             _ -> advanceStart
         _ -> advanceStart
   where
@@ -350,8 +561,11 @@ backtrackOrNextStart mode regex target startIdx stack steps fuel =
       in if nextStart <= seqLength target
            then
              let freshThread = ThreadState 0 nextStart (emptyCaptureSlots (regex.maxGroupIndex + 1))
-             in stepVMWithMode mode regex target nextStart freshThread [] steps fuel
-           else NoMatch
+                 !units' = max ctx.vmUnitsScanned nextStart
+             in stepVMWithMetrics mode regex target nextStart freshThread [] ctx { vmUnitsScanned = units' } fuel
+           else
+             let metrics = buildStepMetrics fuel target ctx 0
+             in MatchOutcome NoMatch metrics
 
 -- | Construct a final 't:MatchResult' from the terminating thread registers.
 buildResult :: RegexTarget s => Regex -> s -> ThreadState -> Int -> MatchResult s
