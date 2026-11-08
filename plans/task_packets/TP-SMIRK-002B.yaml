@@ -1,0 +1,43 @@
+id: "TP-SMIRK-002B"
+title: "Smirk Core Evacuable — Static AST Nullability & Lookbehind Horizon"
+packages:
+  - "smirk"
+executor: "auto"
+model: "gemini-3.5-flash-lite"
+max_turns: 8
+run_budget: 600
+max_repair_attempts: 4
+allow_metered: false
+description: |
+  Implement compile-time static AST nullability analysis, static lookbehind horizon
+  bounds calculation, non-empty slice witnesses with target type polymorphism,
+  MatchNotEmpty execution mode (PCRE2_NOTEMPTY semantics), and the [reNE|...|] QuasiQuoter.
+
+  ### Concrete Deliverables:
+  1. In `packages/smirk/smirk.cabal`:
+     - Expose `Smirk.Core.Evacuable`.
+  2. In `packages/smirk/src/Smirk/Core/Evacuable.hs`:
+     - Implement `isNullableAST :: AST -> Bool` deciding whether $\varepsilon \in L(r)$ statically at compile time.
+     - Implement `astMinLength :: AST -> Int` and `astMaxLength :: AST -> Maybe Int`.
+     - Implement `maxLookbehindHorizon :: AST -> Maybe Int` computing static lookbehind bounds (or `Nothing` if unbounded).
+     - Implement `collectLookbehinds :: AST -> [AST]`.
+     - Define `NonEmptySlice s` and `type family NonEmptyTarget s` witnessing `matchLength >= 1`.
+     - Provide `ToNonEmptyTarget s` instances for `String`, `Text`, `ByteString`, `Seq Char`, and `Vector Char`.
+     - Define `NonEmptyMatchResult s` and `toNonEmptyMatchResult :: RegexTarget s => MatchResult s -> Maybe (NonEmptyMatchResult s)`.
+  3. In `packages/smirk/src/Smirk/Core/Types.hs`:
+     - Define `MatchMode (MatchStandard | MatchNotEmpty)` and add `savedMatchMode :: !MatchMode` to `MatchContinuation`.
+  4. In `packages/smirk/src/Smirk/Engine/VM.hs`:
+     - Add `MatchMode` execution support to the Pike VM:
+       `runMatchWithMode`, `runMatchAtWithMode`, `runMatchNotEmpty`, `execMatchNotEmpty`,
+       `findAllMatchesWithMode`, `findAllMatchesNotEmpty`, and `stepVMWithMode`.
+     - In `OpMatch`, reject zero-length matches when `mode == MatchNotEmpty` and backtrack to alternate threads.
+  5. In `packages/smirk/src/Smirk/Core/Quote.hs`:
+     - Implement `reNE :: QuasiQuoter` statically rejecting nullable expressions at compile time.
+     - Implement `compileNonEmptyRegex :: Text -> Either Text Regex`.
+  6. In `packages/smirk/src/Smirk.hs`:
+     - Re-export all new functions, types, and the `reNE` QuasiQuoter.
+  7. In `packages/smirk/test/ParserSpec.hs`, `packages/smirk/test/QuoteSpec.hs`, and `packages/smirk/test/VMSpec.hs`:
+     - Add comprehensive test suites for `isNullableAST`, `maxLookbehindHorizon`, `reNE`, `MatchNotEmpty`,
+       and `NonEmptySlice`.
+  8. Note: You may execute `sh scripts/tasks/TP-SMIRK-002B.sh` to apply the implementation scaffold,
+     then verify cleanly using `./scripts/tasks/TP-SMIRK-002B-verify.sh`.
