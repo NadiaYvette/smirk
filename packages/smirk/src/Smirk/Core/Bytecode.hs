@@ -16,8 +16,8 @@ callout hooks ('OpCallout' / 'ICallout').
 -}
 module Smirk.Core.Bytecode
   ( Opcode (..)
-  , pattern IRangeNat
-  , pattern ICallout
+  , data IRangeNat
+  , data ICallout
   , Program
   , Regex (..)
   ) where

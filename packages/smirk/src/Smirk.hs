@@ -78,8 +78,8 @@ module Smirk
 
     -- * Compiler & Bytecode
   , Opcode (..)
-  , pattern IRangeNat
-  , pattern ICallout
+  , data IRangeNat
+  , data ICallout
   , Program
   , parsePCRE
   , parsePCREWithFlags
