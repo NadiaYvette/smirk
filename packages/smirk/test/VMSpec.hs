@@ -4,6 +4,7 @@
 module VMSpec (spec) where
 
 import qualified Data.Map.Strict as Map
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray)
 import Data.Text (Text)
 import Polytropos.Core (repTag)
@@ -105,3 +106,55 @@ spec = describe "Smirk.Engine.VM" $ do
         length matches `shouldBe` 3
         map (\m -> m.matchedSlice) matches `shouldBe` ["10", "20", "35"]
       Left err -> expectationFailure (show err)
+
+  describe "MatchNotEmpty (PCRE2_NOTEMPTY Semantics) & NonEmptySlice" $ do
+    it "rejects empty match and finds non-empty match under MatchNotEmpty" $ do
+      case compileRegex "a*" of
+        Right reg -> do
+          -- Under standard mode on "b", "a*" matches "" at index 0
+          case runMatch reg ("b" :: Text) Unlimited of
+            Matched res -> res.matchLength `shouldBe` 0
+            _           -> expectationFailure "Expected empty match in standard mode"
+          -- Under MatchNotEmpty mode on "b", "a*" rejects "" and yields NoMatch
+          case runMatchNotEmpty reg ("b" :: Text) Unlimited of
+            NoMatch -> pure ()
+            _       -> expectationFailure "Expected NoMatch under MatchNotEmpty for 'b'"
+          -- Under MatchNotEmpty mode on "ba", "a*" skips empty prefix and matches "a" at index 1
+          case runMatchNotEmpty reg ("ba" :: Text) Unlimited of
+            Matched res -> do
+              res.matchOffset `shouldBe` 1
+              res.matchLength `shouldBe` 1
+              res.matchedSlice `shouldBe` "a"
+            _ -> expectationFailure "Expected MatchNotEmpty to match 'a' at offset 1"
+        Left e -> expectationFailure (show e)
+
+    it "finds all non-empty matches with findAllMatchesNotEmpty" $ do
+      case compileRegex "a*" of
+        Right reg -> do
+          let matches = findAllMatchesNotEmpty reg ("aba" :: Text)
+          map (\m -> m.matchedSlice) matches `shouldBe` ["a", "a"]
+        Left e -> expectationFailure (show e)
+
+    it "constructs NonEmptySlice and converts to NonEmptyTarget" $ do
+      let neSlice = mkNonEmptySlice ("hello" :: String)
+      case neSlice of
+        Just s -> do
+          let neList = toNonEmptyTarget s
+          neList `shouldBe` ('h' :| "ello")
+          fromNonEmptyTarget @String neList `shouldBe` "hello"
+        Nothing -> expectationFailure "Expected Just NonEmptySlice"
+      mkNonEmptySlice ("" :: String) `shouldBe` Nothing
+
+    it "execMatchNotEmpty returns NonEmptyMatchResult" $ do
+      case compileRegex "[0-9]+" of
+        Right reg -> do
+          case execMatchNotEmpty reg ("abc123xyz" :: Text) of
+            Just res -> do
+              res.matchOffset `shouldBe` 3
+              res.matchLength `shouldBe` 3
+              res.matchedSlice `shouldBe` "123"
+              case toNonEmptyMatchResult res of
+                Just neRes -> unNonEmptySlice neRes.matchedSlice `shouldBe` "123"
+                Nothing    -> expectationFailure "Expected toNonEmptyMatchResult"
+            Nothing -> expectationFailure "Expected execMatchNotEmpty to match"
+        Left e -> expectationFailure (show e)

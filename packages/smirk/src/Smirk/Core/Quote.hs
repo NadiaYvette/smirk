@@ -21,7 +21,11 @@ failures and overhead.
 module Smirk.Core.Quote
   ( -- * QuasiQuoters
     re
+  , reNE
   , ed
+
+    -- * Non-Nullable Compilation
+  , compileNonEmptyRegex
 
     -- * Editor Definition & Application
   , Editor (..)
@@ -39,6 +43,7 @@ import Language.Haskell.TH.Quote
 
 import Smirk.Core.Bytecode (Regex)
 import Smirk.Core.Compiler (compileToRegex)
+import Smirk.Core.Evacuable (isNullableAST)
 import Smirk.Core.Parser (parsePCRE)
 import Smirk.Engine.Sequence (RegexTarget (..))
 import Smirk.Engine.VM (MatchResult (..), findAllMatches)
@@ -69,6 +74,46 @@ quoteRegexExp patternStr =
            Right ast -> compileToRegex (T.pack $(stringE patternStr)) ast
            Left e    -> error ("Smirk regex internal error: " <> T.unpack e)
        |]
+
+-- | QuasiQuoter for compile-time verified non-nullable PCRE regular expressions.
+-- Statically rejects both invalid PCRE syntax and nullable patterns (patterns that
+-- can match the empty string, i.e., @\varepsilon \in L(r)@) at compile time.
+--
+-- === Example
+--
+-- @
+-- let r = [reNE|(?<protocol>https?)://(?<domain>[a-z.]+)|]
+-- @
+reNE :: QuasiQuoter
+reNE = QuasiQuoter
+  { quoteExp  = quoteRegexExpNE
+  , quotePat  = error "Smirk.reNE: Pattern matching quasiquote not supported"
+  , quoteType = error "Smirk.reNE: Type quasiquote not supported"
+  , quoteDec  = error "Smirk.reNE: Declaration quasiquote not supported"
+  }
+
+-- | Compile-time expression quoter for non-nullable regex patterns.
+quoteRegexExpNE :: String -> Q Exp
+quoteRegexExpNE patternStr =
+  case parsePCRE (T.pack patternStr) of
+    Left err -> fail ("Smirk regex compile error: " <> T.unpack err)
+    Right ast
+      | isNullableAST ast ->
+          fail ("Smirk regex compile error: pattern '" <> patternStr <> "' is nullable (matches empty string), rejected by [reNE|...|]")
+      | otherwise ->
+          [| case parsePCRE (T.pack $(stringE patternStr)) of
+               Right parsedAst -> compileToRegex (T.pack $(stringE patternStr)) parsedAst
+               Left e          -> error ("Smirk regex internal error: " <> T.unpack e)
+           |]
+
+-- | Compile a PCRE regular expression requiring that the pattern is non-nullable.
+-- Returns 'Left' if parsing fails or if the pattern matches the empty string.
+compileNonEmptyRegex :: Text -> Either Text Regex
+compileNonEmptyRegex input = do
+  ast <- parsePCRE input
+  if isNullableAST ast
+    then Left ("Pattern is nullable (matches empty string): " <> input)
+    else pure (compileToRegex input ast)
 
 -- | Structured find-and-replace editor record.
 data Editor s = Editor

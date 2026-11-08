@@ -63,6 +63,7 @@ library
         Smirk.Core.Parser
         Smirk.Core.Bytecode
         Smirk.Core.Compiler
+        Smirk.Core.Evacuable
         Smirk.Core.Quote
         Smirk.Core.Types
         Smirk.Engine.Sequence

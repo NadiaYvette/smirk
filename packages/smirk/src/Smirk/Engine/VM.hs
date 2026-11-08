@@ -32,11 +32,20 @@ module Smirk.Engine.VM
   , MatchStatus (..)
   , MatchContinuation (..)
 
+    -- * Execution Modes
+  , MatchMode (..)
+
     -- * Execution Entry Points
   , runMatch
   , runMatchAt
+  , runMatchWithMode
+  , runMatchAtWithMode
+  , runMatchNotEmpty
+  , execMatchNotEmpty
   , resumeMatch
   , findAllMatches
+  , findAllMatchesWithMode
+  , findAllMatchesNotEmpty
 
     -- * Internal VM Engine & Capture Registers
   , ThreadState (..)
@@ -54,6 +63,7 @@ module Smirk.Engine.VM
   , matchNamedCaptureRep
   , lookupNamedCaptureRep
   , stepVM
+  , stepVMWithMode
   , matchClass
   , matchAnchor
   ) where
@@ -68,6 +78,7 @@ import Smirk.Core.Types
   ( CaptureSlots (..)
   , Fuel (..)
   , MatchContinuation (..)
+  , MatchMode (..)
   , MatchResult (..)
   , MatchStatus (..)
   , ThreadState (..)
@@ -118,24 +129,43 @@ To neutralize this threat, Smirk introduces the 'Fuel' budget:
     fuel to resume via 'resumeMatch'.
 -}
 
--- | Execute regex search across a sequence starting from index 0.
+-- | Execute regex search across a sequence starting from index 0 using standard matching.
 runMatch :: RegexTarget s => Regex -> s -> Fuel -> MatchStatus s
-runMatch regex target = runMatchAt regex target 0
+runMatch = runMatchWithMode MatchStandard
 
--- | Execute regex search starting from a specific character offset.
+-- | Execute regex search starting from a specific character offset using standard matching.
 runMatchAt :: RegexTarget s => Regex -> s -> Int -> Fuel -> MatchStatus s
-runMatchAt regex target startIdx fuel =
+runMatchAt = runMatchAtWithMode MatchStandard
+
+-- | Execute regex search across a sequence under an explicit 'MatchMode'.
+runMatchWithMode :: RegexTarget s => MatchMode -> Regex -> s -> Fuel -> MatchStatus s
+runMatchWithMode mode regex target = runMatchAtWithMode mode regex target 0
+
+-- | Execute regex search starting from a specific character offset under an explicit 'MatchMode'.
+runMatchAtWithMode :: RegexTarget s => MatchMode -> Regex -> s -> Int -> Fuel -> MatchStatus s
+runMatchAtWithMode mode regex target startIdx fuel =
   let len = seqLength target
   in if startIdx > len
        then NoMatch
        else
          let initialThread = ThreadState 0 startIdx (emptyCaptureSlots (regex.maxGroupIndex + 1))
-         in stepVM regex target startIdx initialThread [] 0 fuel
+         in stepVMWithMode mode regex target startIdx initialThread [] 0 fuel
 
--- | Resume a previously suspended match with additional fuel.
+-- | Execute regex search enforcing 'MatchNotEmpty' (PCRE2_NOTEMPTY semantics: rejects empty matches).
+runMatchNotEmpty :: RegexTarget s => Regex -> s -> Fuel -> MatchStatus s
+runMatchNotEmpty = runMatchWithMode MatchNotEmpty
+
+-- | Execute non-empty regex search returning the first non-empty match, if any.
+execMatchNotEmpty :: RegexTarget s => Regex -> s -> Maybe (MatchResult s)
+execMatchNotEmpty reg target = case runMatchNotEmpty reg target Unlimited of
+  Matched res -> Just res
+  _           -> Nothing
+
+-- | Resume a previously suspended match with additional fuel, preserving its 'MatchMode'.
 resumeMatch :: RegexTarget s => MatchContinuation s -> Fuel -> MatchStatus s
 resumeMatch cont =
-  stepVM
+  stepVMWithMode
+    cont.savedMatchMode
     cont.savedRegex
     cont.savedTarget
     cont.savedStartIndex
@@ -143,20 +173,27 @@ resumeMatch cont =
     cont.backtrackStack
     cont.currentSteps
 
--- | Find all non-overlapping matches across the target sequence.
+-- | Find all non-overlapping matches across the target sequence in standard matching mode.
 findAllMatches :: RegexTarget s => Regex -> s -> [MatchResult s]
-findAllMatches regex target = go 0
+findAllMatches = findAllMatchesWithMode MatchStandard
+
+-- | Find all non-overlapping matches under an explicit 'MatchMode'.
+findAllMatchesWithMode :: RegexTarget s => MatchMode -> Regex -> s -> [MatchResult s]
+findAllMatchesWithMode mode regex target = go 0
   where
     go off
       | off > seqLength target = []
-      | otherwise = case runMatchAt regex target off Unlimited of
+      | otherwise = case runMatchAtWithMode mode regex target off Unlimited of
           Matched res ->
             let nextOff = max (off + 1) (res.matchOffset + res.matchLength)
             in res : go nextOff
           _ -> []
 
--- | Core backtracking execution step loop.
--- Evaluates one instruction and advances the thread or backtracks to an alternate branch.
+-- | Find all non-overlapping matches enforcing non-empty match lengths (matchLength >= 1).
+findAllMatchesNotEmpty :: RegexTarget s => Regex -> s -> [MatchResult s]
+findAllMatchesNotEmpty = findAllMatchesWithMode MatchNotEmpty
+
+-- | Core backtracking execution step loop under standard matching mode.
 stepVM
   :: RegexTarget s
   => Regex
@@ -167,11 +204,27 @@ stepVM
   -> Int               -- ^ Steps consumed so far
   -> Fuel              -- ^ Fuel limit
   -> MatchStatus s
-stepVM regex target startIdx th stack steps fuel =
+stepVM = stepVMWithMode MatchStandard
+
+-- | Core backtracking execution step loop under an explicit 'MatchMode'.
+-- Evaluates one instruction and advances the thread or backtracks to an alternate branch.
+stepVMWithMode
+  :: RegexTarget s
+  => MatchMode         -- ^ Execution mode (standard or non-empty)
+  -> Regex
+  -> s
+  -> Int               -- ^ Outer loop start index
+  -> ThreadState       -- ^ Current active thread
+  -> [ThreadState]     -- ^ Backtrack stack
+  -> Int               -- ^ Steps consumed so far
+  -> Fuel              -- ^ Fuel limit
+  -> MatchStatus s
+stepVMWithMode mode regex target startIdx th stack steps fuel =
   case fuel of
     StepBudget budget | steps >= budget ->
       OutOfFuel MatchContinuation
-        { savedRegex      = regex
+        { savedMatchMode  = mode
+        , savedRegex      = regex
         , savedTarget     = target
         , savedStartIndex = startIdx
         , currentThread   = th
@@ -182,60 +235,60 @@ stepVM regex target startIdx th stack steps fuel =
       let prog = regex.program
           pc' = th.pc
       in if pc' < 0 || pc' >= V.length prog
-           then backtrackOrNextStart regex target startIdx stack (steps + 1) fuel
+           then backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
            else case prog V.! pc' of
              OpChar expected ->
                case seqIndex target th.strIdx of
                  Just c | c == expected ->
-                   stepVM regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + 1 } stack (steps + 1) fuel
-                 _ -> backtrackOrNextStart regex target startIdx stack (steps + 1) fuel
+                   stepVMWithMode mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + 1 } stack (steps + 1) fuel
+                 _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
 
              OpClass cls ->
                case seqIndex target th.strIdx of
                  Just c | matchClass cls c ->
-                   stepVM regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + 1 } stack (steps + 1) fuel
-                 _ -> backtrackOrNextStart regex target startIdx stack (steps + 1) fuel
+                   stepVMWithMode mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + 1 } stack (steps + 1) fuel
+                 _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
 
              OpAnchor anchor ->
                if matchAnchor anchor th.strIdx target
-                 then stepVM regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
-                 else backtrackOrNextStart regex target startIdx stack (steps + 1) fuel
+                 then stepVMWithMode mode regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
+                 else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
 
              OpSplit d1 d2 ->
                let branch2 = th { pc = pc' + d2 }
                    branch1 = th { pc = pc' + d1 }
-               in stepVM regex target startIdx branch1 (branch2 : stack) (steps + 1) fuel
+               in stepVMWithMode mode regex target startIdx branch1 (branch2 : stack) (steps + 1) fuel
 
              OpJump d ->
-               stepVM regex target startIdx th { pc = pc' + d } stack (steps + 1) fuel
+               stepVMWithMode mode regex target startIdx th { pc = pc' + d } stack (steps + 1) fuel
 
              OpSaveStart idx ->
                let !saves' = setCaptureStart idx th.strIdx th.saves
-               in stepVM regex target startIdx th { pc = pc' + 1, saves = saves' } stack (steps + 1) fuel
+               in stepVMWithMode mode regex target startIdx th { pc = pc' + 1, saves = saves' } stack (steps + 1) fuel
 
              OpSaveEnd idx ->
                let !saves' = setCaptureEnd idx th.strIdx th.saves
-               in stepVM regex target startIdx th { pc = pc' + 1, saves = saves' } stack (steps + 1) fuel
+               in stepVMWithMode mode regex target startIdx th { pc = pc' + 1, saves = saves' } stack (steps + 1) fuel
 
              OpAssertLookahead subProg isPos ->
                let subRegex = regex { program = subProg }
-                   subMatched = case runMatchAt subRegex target th.strIdx (StepBudget 1000) of
+                   subMatched = case runMatchAtWithMode MatchStandard subRegex target th.strIdx (StepBudget 1000) of
                      Matched _ -> True
                      _         -> False
                in if subMatched == isPos
-                    then stepVM regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
-                    else backtrackOrNextStart regex target startIdx stack (steps + 1) fuel
+                    then stepVMWithMode mode regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
+                    else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
 
              OpAssertLookbehind subProg isPos ->
                let subRegex = regex { program = subProg }
                    subMatched = any (\prevOff ->
-                     case runMatchAt subRegex target prevOff (StepBudget 1000) of
+                     case runMatchAtWithMode MatchStandard subRegex target prevOff (StepBudget 1000) of
                        Matched res -> res.matchOffset + res.matchLength == th.strIdx
                        _           -> False
                      ) [max 0 (th.strIdx - 20) .. th.strIdx]
                in if subMatched == isPos
-                    then stepVM regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
-                    else backtrackOrNextStart regex target startIdx stack (steps + 1) fuel
+                    then stepVMWithMode mode regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
+                    else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
 
              OpMatchBackRef idx ->
                case getCaptureSpan idx th.saves of
@@ -244,27 +297,34 @@ stepVM regex target startIdx th stack steps fuel =
                        refSlice = seqSlice st refLen target
                        targetSlice = seqSlice th.strIdx refLen target
                    in if seqToText refSlice == seqToText targetSlice
-                        then stepVM regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + refLen } stack (steps + 1) fuel
-                        else backtrackOrNextStart regex target startIdx stack (steps + 1) fuel
-                 _ -> backtrackOrNextStart regex target startIdx stack (steps + 1) fuel
+                        then stepVMWithMode mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + refLen } stack (steps + 1) fuel
+                        else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                 _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
 
              OpMatch ->
-               Matched (buildResult regex target th (steps + 1))
+               let res = buildResult regex target th (steps + 1)
+               in case mode of
+                 MatchNotEmpty | res.matchLength == 0 ->
+                   -- Reject empty match under PCRE2_NOTEMPTY semantics: backtrack!
+                   backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                 _ ->
+                   Matched res
 
 -- | Backtrack to next pending thread on stack, or advance outer search loop.
 backtrackOrNextStart
   :: RegexTarget s
-  => Regex
+  => MatchMode
+  -> Regex
   -> s
   -> Int
   -> [ThreadState]
   -> Int
   -> Fuel
   -> MatchStatus s
-backtrackOrNextStart regex target startIdx stack steps fuel =
+backtrackOrNextStart mode regex target startIdx stack steps fuel =
   case stack of
     (nextTh : rest) ->
-      stepVM regex target startIdx nextTh rest steps fuel
+      stepVMWithMode mode regex target startIdx nextTh rest steps fuel
     [] ->
       case regex.program V.!? 0 of
         Just (OpSaveStart 0) ->
@@ -278,7 +338,7 @@ backtrackOrNextStart regex target startIdx stack steps fuel =
       in if nextStart <= seqLength target
            then
              let freshThread = ThreadState 0 nextStart (emptyCaptureSlots (regex.maxGroupIndex + 1))
-             in stepVM regex target nextStart freshThread [] steps fuel
+             in stepVMWithMode mode regex target nextStart freshThread [] steps fuel
            else NoMatch
 
 -- | Construct a final 't:MatchResult' from the terminating thread registers.

@@ -57,7 +57,8 @@ module Smirk.Core.Types
     -- * Fuel & Budgeting
   , Fuel (..)
 
-    -- * Match Outcomes
+    -- * Match Execution Modes & Outcomes
+  , MatchMode (..)
   , MatchResult (..)
   , MatchStatus (..)
   , MatchContinuation (..)
@@ -283,9 +284,16 @@ data ThreadState = ThreadState
   , saves  :: !CaptureSlots  -- ^ Flat unboxed capture registers
   } deriving stock (Eq, Show, Generic)
 
+-- | Match execution mode controlling empty match acceptance.
+data MatchMode
+  = MatchStandard   -- ^ Standard matching: allows zero-length (empty) matches
+  | MatchNotEmpty   -- ^ PCRE2_NOTEMPTY semantics: rejects zero-length matches (matchLength >= 1)
+  deriving stock (Eq, Show, Generic)
+
 -- | Pausable and resumable execution continuation captured when fuel is exhausted.
 data MatchContinuation s = MatchContinuation
-  { savedRegex       :: !Regex          -- ^ The compiled regex being evaluated
+  { savedMatchMode   :: !MatchMode      -- ^ Match execution mode (standard or non-empty)
+  , savedRegex       :: !Regex          -- ^ The compiled regex being evaluated
   , savedTarget      :: !s              -- ^ The target sequence
   , savedStartIndex  :: !Int            -- ^ Outer search loop start offset
   , currentThread    :: !ThreadState    -- ^ Active thread state at suspension point

@@ -31,10 +31,12 @@ module Smirk
     Regex (..)
   , compileRegex
   , compileRegexWithFlags
+  , compileNonEmptyRegex
   , Flags (..)
   , defaultFlags
   , testMatch
   , execMatch
+  , execMatchNotEmpty
   , execMatchWithFuel
 
     -- * Glob Matching
@@ -48,13 +50,30 @@ module Smirk
 
     -- * QuasiQuoters & Editors
   , re
+  , reNE
   , ed
   , glob
   , Editor (..)
   , applyEditor
 
-    -- * AST & Compiler
+    -- * AST Analysis & Evacuability
   , AST (..)
+  , isNullableAST
+  , astMinLength
+  , astMaxLength
+  , maxLookbehindHorizon
+  , collectLookbehinds
+
+    -- * Non-Empty Slices & Targets
+  , NonEmptySlice (..)
+  , mkNonEmptySlice
+  , unsafeNonEmptySlice
+  , NonEmptyTarget
+  , ToNonEmptyTarget (..)
+  , NonEmptyMatchResult (..)
+  , toNonEmptyMatchResult
+
+    -- * Compiler & Bytecode
   , Opcode (..)
   , Program
   , parsePCRE
@@ -62,16 +81,22 @@ module Smirk
   , compileAST
   , compileToRegex
 
-    -- * Execution & VM
+    -- * Execution & VM Modes
   , RegexTarget (..)
   , Fuel (..)
+  , MatchMode (..)
   , MatchResult (..)
   , MatchStatus (..)
   , MatchContinuation (..)
   , runMatch
   , runMatchAt
+  , runMatchWithMode
+  , runMatchAtWithMode
+  , runMatchNotEmpty
   , resumeMatch
   , findAllMatches
+  , findAllMatchesWithMode
+  , findAllMatchesNotEmpty
 
     -- * Capture Registers & Polytropos Projections
   , CaptureSlots (..)
@@ -92,6 +117,7 @@ import Data.Text (Text)
 import Smirk.Core.AST
 import Smirk.Core.Bytecode
 import Smirk.Core.Compiler
+import Smirk.Core.Evacuable
 import Smirk.Core.Parser
 import Smirk.Core.Quote
 import Smirk.Core.Types

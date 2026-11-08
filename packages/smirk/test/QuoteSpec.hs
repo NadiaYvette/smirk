@@ -33,3 +33,21 @@ spec = describe "Smirk.Core.Quote ([re|...|] & [ed|...|])" $ do
           input = ("test code with text" :: Text)
           result = applyEditor editor input
       result `shouldBe` "[test] [code] [with] [text]"
+
+  describe "[reNE|...|] Compile-Time Non-Nullable QuasiQuoter" $ do
+    it "matches compile-time validated non-empty regular expressions" $ do
+      let regex = [reNE|[a-zA-Z]+|]
+      case execMatch regex ("hello world" :: Text) of
+        Just res -> res.matchedSlice `shouldBe` "hello"
+        Nothing  -> expectationFailure "Expected [reNE|...|] regex to match"
+
+    it "validates that non-nullable regexes succeed and nullable fail via compileNonEmptyRegex" $ do
+      case compileNonEmptyRegex "a+" of
+        Right _  -> pure ()
+        Left err -> expectationFailure ("Expected non-nullable 'a+' to compile: " <> show err)
+      case compileNonEmptyRegex "a*" of
+        Left err -> err `shouldBe` "Pattern is nullable (matches empty string): a*"
+        Right _  -> expectationFailure "Expected nullable pattern 'a*' to be rejected"
+      case compileNonEmptyRegex "a|b*" of
+        Left err -> err `shouldBe` "Pattern is nullable (matches empty string): a|b*"
+        Right _  -> expectationFailure "Expected nullable alternation to be rejected"
