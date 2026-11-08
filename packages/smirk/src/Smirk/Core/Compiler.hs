@@ -98,6 +98,8 @@ compileAST = \case
     in [OpAssertLookbehind subProg isPos]
   BackRef idx -> [OpMatchBackRef idx]
   NamedBackRef _ -> []
+  IntervalNat minVal maxVal -> [OpRangeNat minVal maxVal]
+  Callout num mTag -> [OpCallout num mTag]
 
 compileAlt :: [AST] -> [Opcode]
 compileAlt [] = []

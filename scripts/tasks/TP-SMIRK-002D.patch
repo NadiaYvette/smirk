@@ -1,0 +1,696 @@
+diff --git a/packages/smirk-penelope/test/Spec.hs b/packages/smirk-penelope/test/Spec.hs
+index ab2b795..ec82e8e 100644
+--- a/packages/smirk-penelope/test/Spec.hs
++++ b/packages/smirk-penelope/test/Spec.hs
+@@ -1,7 +1,6 @@
+ {-# LANGUAGE DataKinds #-}
+ {-# LANGUAGE OverloadedRecordDot #-}
+ {-# LANGUAGE OverloadedStrings #-}
+-{-# LANGUAGE TypeApplications #-}
+ 
+ module Main (main) where
+ 
+diff --git a/packages/smirk/src/Smirk.hs b/packages/smirk/src/Smirk.hs
+index 604dc83..83cbb9d 100644
+--- a/packages/smirk/src/Smirk.hs
++++ b/packages/smirk/src/Smirk.hs
+@@ -1,3 +1,5 @@
++{-# LANGUAGE PatternSynonyms #-}
++
+ {- |
+ Module      : Smirk
+ Description : Pure, effectful, resumable, step-budgeted PCRE interpreter for Haskell
+@@ -34,6 +36,7 @@ module Smirk
+   , compileNonEmptyRegex
+   , Flags (..)
+   , defaultFlags
++  , enableIntervals
+   , testMatch
+   , execMatch
+   , execMatchNotEmpty
+@@ -75,11 +78,14 @@ module Smirk
+ 
+     -- * Compiler & Bytecode
+   , Opcode (..)
++  , pattern IRangeNat
++  , pattern ICallout
+   , Program
+   , parsePCRE
+   , parsePCREWithFlags
+   , compileAST
+   , compileToRegex
++  , scanWord64
+ 
+     -- * Execution & VM Modes
+   , RegexTarget (..)
+diff --git a/packages/smirk/src/Smirk/Core/AST.hs b/packages/smirk/src/Smirk/Core/AST.hs
+index 26ff7ce..40a9750 100644
+--- a/packages/smirk/src/Smirk/Core/AST.hs
++++ b/packages/smirk/src/Smirk/Core/AST.hs
+@@ -20,9 +20,11 @@ module Smirk.Core.AST
+   , LookDir (..)
+   , Flags (..)
+   , defaultFlags
++  , enableIntervals
+   ) where
+ 
+ import Data.Text (Text)
++import Data.Word (Word64)
+ import GHC.Generics (Generic)
+ 
+ -- | Regex compilation and matching flags controlling parser and VM semantics.
+@@ -30,16 +32,22 @@ data Flags = Flags
+   { caseInsensitive :: !Bool -- ^ (?i) Case-insensitive character matching
+   , dotAll          :: !Bool -- ^ (?s) Dot matches newline characters as well
+   , multiline       :: !Bool -- ^ (?m) ^ and $ match at beginning and end of each line
++  , intervalFlag    :: !Bool -- ^ Lucene INTERVAL syntax mode (<min..max>)
+   } deriving (Eq, Show, Generic)
+ 
+--- | Default flags (standard PCRE mode: case-sensitive, no dotAll, no multiline).
++-- | Default flags (standard PCRE mode: case-sensitive, no dotAll, no multiline, no standalone intervals).
+ defaultFlags :: Flags
+ defaultFlags = Flags
+   { caseInsensitive = False
+   , dotAll          = False
+   , multiline       = False
++  , intervalFlag    = False
+   }
+ 
++-- | Enable Lucene INTERVAL standalone syntax mode (@<min..max>@) in 'Flags'.
++enableIntervals :: Flags -> Flags
++enableIntervals f = f { intervalFlag = True }
++
+ -- | Character range within a character set ([a-z], [0-9]).
+ data CharRange
+   = RangeSingle !Char          -- ^ Single character: @a@
+@@ -92,5 +100,7 @@ data AST
+   | Lookaround !LookDir !Bool !AST               -- ^ Zero-width lookaround assertion: direction, positive/negative, and inner AST
+   | BackRef !Int                                 -- ^ Numbered backreference: @\\1@
+   | NamedBackRef !Text                           -- ^ Named backreference: @\\k<name>@
++  | IntervalNat !Word64 !Word64                  -- ^ Decimal natural interval: @(?<min..max>)@ or @<min..max>@
++  | Callout !Int !(Maybe Text)                   -- ^ PCRE Callout inspection point: @(?C)@, @(?Cn)@, @(?C"tag")@
+   | Empty                                        -- ^ Empty / epsilon AST node
+   deriving (Eq, Show, Generic)
+diff --git a/packages/smirk/src/Smirk/Core/Bytecode.hs b/packages/smirk/src/Smirk/Core/Bytecode.hs
+index cc81812..a059148 100644
+--- a/packages/smirk/src/Smirk/Core/Bytecode.hs
++++ b/packages/smirk/src/Smirk/Core/Bytecode.hs
+@@ -1,4 +1,5 @@
+ {-# LANGUAGE DeriveGeneric #-}
++{-# LANGUAGE PatternSynonyms #-}
+ 
+ {- |
+ Module      : Smirk.Core.Bytecode
+@@ -9,10 +10,14 @@ License     : Apache-2.0
+ Defines the low-level virtual machine bytecode instruction set ('Opcode')
+ used by the Pike-style non-backtracking / thread-stepped VM in 'Smirk.Engine.VM'.
+ Includes relative jumping, nondeterministic thread branching ('OpSplit'),
+-capture slot registers ('OpSaveStart', 'OpSaveEnd'), and lookaround subprograms.
++capture slot registers ('OpSaveStart', 'OpSaveEnd'), lookaround subprograms,
++Lucene numeric natural intervals ('OpRangeNat' / 'IRangeNat'), and PCRE
++callout hooks ('OpCallout' / 'ICallout').
+ -}
+ module Smirk.Core.Bytecode
+   ( Opcode (..)
++  , pattern IRangeNat
++  , pattern ICallout
+   , Program
+   , Regex (..)
+   ) where
+@@ -20,6 +25,7 @@ module Smirk.Core.Bytecode
+ import Data.Map.Strict (Map)
+ import Data.Text (Text)
+ import Data.Vector (Vector)
++import Data.Word (Word64)
+ import GHC.Generics (Generic)
+ 
+ import Smirk.Core.AST (Anchor, CharClass)
+@@ -36,9 +42,24 @@ data Opcode
+   | OpAssertLookahead !(Vector Opcode) !Bool       -- ^ Zero-width lookahead assertion: subprogram and polarity
+   | OpAssertLookbehind !(Vector Opcode) !Bool      -- ^ Zero-width lookbehind assertion: subprogram and polarity
+   | OpMatchBackRef !Int                            -- ^ Match dynamic slice previously captured by group $n$
++  | OpRangeNat !Word64 !Word64                     -- ^ Lucene-style decimal natural interval [min..max] [ref:note-lucene-interval-syntax]
++  | OpCallout !Int !(Maybe Text)                   -- ^ PCRE Callout hook with callout index and optional tag [ref:note-pcre-callout-syntax]
+   | OpMatch                                        -- ^ Successful match reached; terminate thread
+   deriving (Eq, Show, Generic)
+ 
++-- | Pattern synonym for Lucene-style decimal natural interval bytecode instruction.
++-- Matches decimal numerals whose numerical value is within $[ \text{min}, \text{max} ]$
++-- in $O(\text{digits})$ time with zero backtracking.
++-- [ref:note-lucene-interval-syntax]
++pattern IRangeNat :: Word64 -> Word64 -> Opcode
++pattern IRangeNat lo hi = OpRangeNat lo hi
++
++-- | Pattern synonym for PCRE callout bytecode instruction.
++-- Represents a zero-width inspection hook carrying a numeric identifier and optional tag.
++-- [ref:note-pcre-callout-syntax]
++pattern ICallout :: Int -> Maybe Text -> Opcode
++pattern ICallout num tag = OpCallout num tag
++
+ -- | Compiled bytecode sequence indexed as a contiguous vector.
+ type Program = Vector Opcode
+ 
+diff --git a/packages/smirk/src/Smirk/Core/Compiler.hs b/packages/smirk/src/Smirk/Core/Compiler.hs
+index c139e72..f80c315 100644
+--- a/packages/smirk/src/Smirk/Core/Compiler.hs
++++ b/packages/smirk/src/Smirk/Core/Compiler.hs
+@@ -98,6 +98,8 @@ compileAST = \case
+     in [OpAssertLookbehind subProg isPos]
+   BackRef idx -> [OpMatchBackRef idx]
+   NamedBackRef _ -> []
++  IntervalNat minVal maxVal -> [OpRangeNat minVal maxVal]
++  Callout num mTag -> [OpCallout num mTag]
+ 
+ compileAlt :: [AST] -> [Opcode]
+ compileAlt [] = []
+diff --git a/packages/smirk/src/Smirk/Core/Evacuable.hs b/packages/smirk/src/Smirk/Core/Evacuable.hs
+index 004eedd..560f435 100644
+--- a/packages/smirk/src/Smirk/Core/Evacuable.hs
++++ b/packages/smirk/src/Smirk/Core/Evacuable.hs
+@@ -85,6 +85,8 @@ isNullableAST = \case
+   Lookaround {}           -> True
+   BackRef _               -> True
+   NamedBackRef _          -> True
++  IntervalNat _ _         -> False
++  Callout _ _             -> True
+   Empty                   -> True
+ 
+ -- | Statically calculate the minimum character match length of an AST.
+@@ -101,6 +103,8 @@ astMinLength = \case
+   Lookaround {}           -> 0
+   BackRef _               -> 0
+   NamedBackRef _          -> 0
++  IntervalNat minVal _    -> max 1 (length (show minVal))
++  Callout _ _             -> 0
+   Empty                   -> 0
+ 
+ -- | Statically calculate the maximum character match length of an AST,
+@@ -124,6 +128,8 @@ astMaxLength = \case
+   Lookaround {}           -> Just 0
+   BackRef _               -> Nothing
+   NamedBackRef _          -> Nothing
++  IntervalNat _ maxVal    -> Just (length (show maxVal))
++  Callout _ _             -> Just 0
+   Empty                   -> Just 0
+   where
+     sumMaybes [] = Just 0
+diff --git a/packages/smirk/src/Smirk/Core/Parser.hs b/packages/smirk/src/Smirk/Core/Parser.hs
+index eab15c7..4e65da3 100644
+--- a/packages/smirk/src/Smirk/Core/Parser.hs
++++ b/packages/smirk/src/Smirk/Core/Parser.hs
+@@ -28,12 +28,22 @@ module Smirk.Core.Parser
+   , Parser
+   , pRegex
+   , pAlternation
++  , pAlternationWithFlags
+   , pSequence
++  , pSequenceWithFlags
+   , pRepeatItem
++  , pRepeatItemWithFlags
+   , pRepetition
+   , pAtom
++  , pAtomWithFlags
+   , pGroup
++  , pGroupWithFlags
+   , pNamedGroup
++  , pNamedGroupWithFlags
++  , pCallout
++  , pIntervalBounds
++  , pIntervalGroup
++  , pStandaloneInterval
+   , pClassSet
+   , pRangeItem
+   , pBackRef
+@@ -42,16 +52,47 @@ module Smirk.Core.Parser
+   ) where
+ 
+ import Control.Monad (void)
+-import Data.Char (isDigit)
++import Data.Char (isAlpha, isAlphaNum, isDigit)
++import Data.Maybe (fromMaybe)
+ import Data.Text (Text)
+ import qualified Data.Text as T
+ import Data.Void (Void)
++import Data.Word (Word64)
+ import Text.Megaparsec
+ import Text.Megaparsec.Char
+ import qualified Text.Megaparsec.Char.Lexer as L
+ 
+ import Smirk.Core.AST
+ 
++{- Note [Lucene Decimal Natural Interval Syntax]
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++[tag:note-lucene-interval-syntax]
++Lucene INTERVAL expressions match decimal natural numbers within an inclusive
++range [min..max] deterministically in O(digits) time with zero backtracking.
++Smirk supports:
++  1. Parenthesized interval syntax: (?<min..max>) (always available)
++  2. Standalone interval syntax: <min..max> (when Flags.intervalFlag is enabled)
++
++The parser disambiguates (?<min..max>) from named capture groups (?<name>pattern)
++by attempting to parse digits separated by '..' before the closing '>'. If the
++content is not a valid decimal interval, it backtracks and parses as a named group.
++Valid intervals enforce min <= max; min > max is rejected as a syntax error.
++-}
++
++{- Note [PCRE Callout Syntax]
++~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++[tag:note-pcre-callout-syntax]
++PCRE callouts allow inspection and control points during pattern matching.
++Smirk supports standard PCRE callout forms:
++  1. Default callout: (?C) (index 0, no tag)
++  2. Numbered callout: (?Cn) (index n, no tag)
++  3. Tagged callout: (?C"tag") or (?C'tag') (index 0, tag text)
++  4. Numbered and tagged callout: (?Cn"tag") (index n, tag text)
++
++Callouts compile to the OpCallout / ICallout opcode, executing as zero-width
++inspection points in the VM.
++-}
++
+ -- | Megaparsec parser type over strict Text with Void error components.
+ type Parser = Parsec Void Text
+ 
+@@ -72,32 +113,44 @@ parsePCREWithFlags initFlags input =
+ 
+ -- | Top-level regular expression parser consuming to end-of-input.
+ pRegex :: Flags -> Parser AST
+-pRegex _initFlags = do
+-  res <- pAlternation
++pRegex flags = do
++  res <- pAlternationWithFlags flags
+   eof
+   pure res
+ 
+--- | Parse an alternation branch (@branch1 | branch2 | ...@).
++-- | Parse an alternation branch (@branch1 | branch2 | ...@) with default flags.
+ pAlternation :: Parser AST
+-pAlternation = do
+-  branches <- sepBy1 pSequence (char '|')
++pAlternation = pAlternationWithFlags defaultFlags
++
++-- | Parse an alternation branch (@branch1 | branch2 | ...@) with explicit flags.
++pAlternationWithFlags :: Flags -> Parser AST
++pAlternationWithFlags flags = do
++  branches <- sepBy1 (pSequenceWithFlags flags) (char '|')
+   pure $ case branches of
+     [singleBranch] -> singleBranch
+     multiple       -> Alt multiple
+ 
+--- | Parse a sequence of concatenated items (@item1 item2 ...@).
++-- | Parse a sequence of concatenated items (@item1 item2 ...@) with default flags.
+ pSequence :: Parser AST
+-pSequence = do
+-  items <- many pRepeatItem
++pSequence = pSequenceWithFlags defaultFlags
++
++-- | Parse a sequence of concatenated items (@item1 item2 ...@) with explicit flags.
++pSequenceWithFlags :: Flags -> Parser AST
++pSequenceWithFlags flags = do
++  items <- many (pRepeatItemWithFlags flags)
+   pure $ case items of
+     []           -> Empty
+     [singleItem] -> singleItem
+     multiple     -> Seq multiple
+ 
+--- | Parse an atom with an optional repetition suffix.
++-- | Parse an atom with an optional repetition suffix with default flags.
+ pRepeatItem :: Parser AST
+-pRepeatItem = do
+-  atom <- pAtom
++pRepeatItem = pRepeatItemWithFlags defaultFlags
++
++-- | Parse an atom with an optional repetition suffix with explicit flags.
++pRepeatItemWithFlags :: Flags -> Parser AST
++pRepeatItemWithFlags flags = do
++  atom <- pAtomWithFlags flags
+   mRep <- optional pRepetition
+   pure $ case mRep of
+     Nothing                 -> atom
+@@ -134,10 +187,15 @@ pRepetition = do
+       <|> (char '+' >> pure RepPossessive)
+       <|> pure RepGreedy
+ 
+--- | Parse an atomic expression: group, class set, dot, anchor, backreference, or literal.
++-- | Parse an atomic expression: group, interval, class set, dot, anchor, backreference, or literal.
+ pAtom :: Parser AST
+-pAtom =
+-  pGroup
++pAtom = pAtomWithFlags defaultFlags
++
++-- | Parse an atomic expression with explicit 'Flags'.
++pAtomWithFlags :: Flags -> Parser AST
++pAtomWithFlags flags =
++  pGroupWithFlags flags
++  <|> (if intervalFlag flags then pStandaloneInterval else empty)
+   <|> pClassSet
+   <|> pDot
+   <|> pAnchor
+@@ -157,27 +215,80 @@ pAnchor =
+   <|> (string "\\b" >> pure (AnchorAssert AnchorWordBoundary))
+   <|> (string "\\B" >> pure (AnchorAssert AnchorNotWordBoundary))
+ 
+--- | Parse parenthesized group constructs, handling both capturing and non-capturing/lookaround variants.
++-- | Parse parenthesized group constructs with default flags.
+ pGroup :: Parser AST
+-pGroup = between (char '(') (char ')') $ do
++pGroup = pGroupWithFlags defaultFlags
++
++-- | Parse parenthesized group constructs, handling capturing, non-capturing,
++-- lookaround, callout, and interval variants.
++pGroupWithFlags :: Flags -> Parser AST
++pGroupWithFlags flags = between (char '(') (char ')') $ do
+   mSpecial <- optional (char '?')
+   case mSpecial of
+-    Nothing -> Group Nothing Nothing <$> pAlternation
++    Nothing -> Group Nothing Nothing <$> pAlternationWithFlags flags
+     Just _ ->
+-      (string ":" >> (NonCapturing <$> pAlternation))
+-        <|> (string "=" >> (Lookaround Lookahead True <$> pAlternation))
+-        <|> (string "!" >> (Lookaround Lookahead False <$> pAlternation))
+-        <|> (string "<=" >> (Lookaround Lookbehind True <$> pAlternation))
+-        <|> (string "<!" >> (Lookaround Lookbehind False <$> pAlternation))
+-        <|> pNamedGroup
+-
+--- | Parse a named capture group: @(?<name>pattern)@.
++      (string ":" >> (NonCapturing <$> pAlternationWithFlags flags))
++        <|> (string "=" >> (Lookaround Lookahead True <$> pAlternationWithFlags flags))
++        <|> (string "!" >> (Lookaround Lookahead False <$> pAlternationWithFlags flags))
++        <|> (string "<=" >> (Lookaround Lookbehind True <$> pAlternationWithFlags flags))
++        <|> (string "<!" >> (Lookaround Lookbehind False <$> pAlternationWithFlags flags))
++        <|> pCallout
++        <|> pIntervalGroup
++        <|> pNamedGroupWithFlags flags
++
++-- | Parse PCRE Callout syntax: @(?C)@, @(?Cn)@, @(?C"tag")@, or @(?C'tag')@.
++-- [ref:note-pcre-callout-syntax]
++pCallout :: Parser AST
++pCallout = do
++  void (char 'C')
++  mNum <- optional L.decimal
++  mTag <- optional (pQuotedString '"' <|> pQuotedString '\'')
++  let num = fromMaybe 0 mNum
++  pure (Callout num mTag)
++  where
++    pQuotedString q = between (char q) (char q) (takeWhileP (Just "callout tag") (/= q))
++
++-- | Parse Lucene interval bounds: @<min..max>@.
++-- [ref:note-lucene-interval-syntax]
++pIntervalBounds :: Parser (Word64, Word64)
++pIntervalBounds = do
++  void (char '<')
++  minN <- L.decimal
++  void (string "..")
++  maxN <- L.decimal
++  void (char '>')
++  if minN > maxN
++    then fail "invalid interval bounds: minimum bound cannot exceed maximum bound"
++    else pure (minN, maxN)
++
++-- | Parse a parenthesized decimal natural interval: @(?<min..max>)@.
++-- [ref:note-lucene-interval-syntax]
++pIntervalGroup :: Parser AST
++pIntervalGroup = try $ do
++  (minN, maxN) <- pIntervalBounds
++  pure (IntervalNat minN maxN)
++
++-- | Parse a standalone decimal natural interval: @<min..max>@.
++-- Active when 'intervalFlag' is enabled in 'Flags'.
++-- [ref:note-lucene-interval-syntax]
++pStandaloneInterval :: Parser AST
++pStandaloneInterval = try $ do
++  (minN, maxN) <- pIntervalBounds
++  pure (IntervalNat minN maxN)
++
++-- | Parse a named capture group: @(?<name>pattern)@ with default flags.
+ pNamedGroup :: Parser AST
+-pNamedGroup = do
++pNamedGroup = pNamedGroupWithFlags defaultFlags
++
++-- | Parse a named capture group: @(?<name>pattern)@ with explicit flags.
++pNamedGroupWithFlags :: Flags -> Parser AST
++pNamedGroupWithFlags flags = do
+   void (char '<')
+-  name <- takeWhile1P (Just "group name") (/= '>')
++  firstChar <- satisfy (\c -> isAlpha c || c == '_')
++  restChars <- takeWhileP (Just "group name characters") (\c -> isAlphaNum c || c == '_')
++  let name = T.cons firstChar restChars
+   void (char '>')
+-  Group (Just name) Nothing <$> pAlternation
++  Group (Just name) Nothing <$> pAlternationWithFlags flags
+ 
+ -- | Parse a bracketed character set: @[abc]@, @[a-z0-9]@, or negated @[^a-z]@.
+ pClassSet :: Parser AST
+diff --git a/packages/smirk/src/Smirk/Engine/VM.hs b/packages/smirk/src/Smirk/Engine/VM.hs
+index b4cd55e..0e4e0f8 100644
+--- a/packages/smirk/src/Smirk/Engine/VM.hs
++++ b/packages/smirk/src/Smirk/Engine/VM.hs
+@@ -64,13 +64,15 @@ module Smirk.Engine.VM
+   , lookupNamedCaptureRep
+   , stepVM
+   , stepVMWithMode
++  , scanWord64
+   , matchClass
+   , matchAnchor
+   ) where
+ 
+-import Data.Char (isAlphaNum, isDigit, isSpace)
++import Data.Char (isAlphaNum, isDigit, isSpace, ord)
+ import qualified Data.Map.Strict as Map
+ import qualified Data.Vector as V
++import Data.Word (Word64)
+ 
+ import Smirk.Core.AST (Anchor (..), CharClass (..), CharRange (..))
+ import Smirk.Core.Bytecode (Opcode (..), Regex (..))
+@@ -301,6 +303,16 @@ stepVMWithMode mode regex target startIdx th stack steps fuel =
+                         else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+                  _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+ 
++             OpRangeNat minVal maxVal ->
++               case scanWord64 target th.strIdx of
++                 (Just val, !len) | val >= minVal && val <= maxVal ->
++                   stepVMWithMode mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + len } stack (steps + 1) fuel
++                 _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
++
++             OpCallout _num _tag ->
++               -- PCRE Callout: zero-width inspection hook [ref:note-pcre-callout-syntax]
++               stepVMWithMode mode regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
++
+              OpMatch ->
+                let res = buildResult regex target th (steps + 1)
+                in case mode of
+@@ -398,3 +410,27 @@ matchAnchor anchor idx target = case anchor of
+     in prevIsWord /= currIsWord
+   AnchorNotWordBoundary ->
+     not (matchAnchor AnchorWordBoundary idx target)
++
++-- | Scan contiguous ASCII decimal digits starting at offset 'start' and compute
++-- the 64-bit unsigned natural number value and character length.
++-- Returns @(Just val, length)@ on successful scan without overflow, or
++-- @(Nothing, length)@ if no digits exist or overflow occurred.
++-- Executes deterministically in $O(\text{digits})$ time with zero allocation.
++-- [ref:note-lucene-interval-syntax]
++scanWord64 :: RegexTarget s => s -> Int -> (Maybe Word64, Int)
++scanWord64 target start = go start 0 0
++  where
++    go idx !acc !count =
++      case seqIndex target idx of
++        Just c | isDigit c ->
++          let d = fromIntegral (ord c - ord '0') :: Word64
++              overflow = acc > (maxBound - d) `div` 10
++          in if overflow
++               then (Nothing, count + 1 + countRest (idx + 1))
++               else go (idx + 1) (acc * 10 + d) (count + 1)
++        _ -> if count == 0 then (Nothing, 0) else (Just acc, count)
++
++    countRest idx =
++      case seqIndex target idx of
++        Just c | isDigit c -> 1 + countRest (idx + 1)
++        _                  -> 0
+diff --git a/packages/smirk/test/ParserSpec.hs b/packages/smirk/test/ParserSpec.hs
+index f89276e..83a91f2 100644
+--- a/packages/smirk/test/ParserSpec.hs
++++ b/packages/smirk/test/ParserSpec.hs
+@@ -1,10 +1,13 @@
+ {-# LANGUAGE OverloadedStrings #-}
++{-# LANGUAGE PatternSynonyms #-}
+ 
+ module ParserSpec (spec) where
+ 
+ import Test.Hspec
+ 
+ import Smirk.Core.AST
++import Smirk.Core.Bytecode (Opcode (..), data IRangeNat, data ICallout)
++import Smirk.Core.Compiler (compileAST)
+ import Smirk.Core.Evacuable
+ import Smirk.Core.Parser
+ 
+@@ -96,3 +99,85 @@ spec = describe "Smirk.Core.Parser" $ do
+         case parsePCRE "(?<=a*)b" of
+           Right ast -> maxLookbehindHorizon ast `shouldBe` Nothing
+           Left e    -> expectationFailure (show e)
++
++  describe "PCRE Callout Syntax" $ do
++    it "parses default callout (?C)" $ do
++      case parsePCRE "(?C)" of
++        Right (Callout 0 Nothing) -> pure ()
++        other -> expectationFailure ("Expected Callout 0 Nothing, got: " <> show other)
++
++    it "parses numbered callouts (?Cn)" $ do
++      case parsePCRE "(?C42)" of
++        Right (Callout 42 Nothing) -> pure ()
++        other -> expectationFailure ("Expected Callout 42 Nothing, got: " <> show other)
++
++    it "parses tagged callouts (?C\"tag\") and (?C'tag')" $ do
++      case parsePCRE "(?C\"debug_trace\")" of
++        Right (Callout 0 (Just "debug_trace")) -> pure ()
++        other -> expectationFailure ("Expected Callout with double-quote tag, got: " <> show other)
++      case parsePCRE "(?C'single_tag')" of
++        Right (Callout 0 (Just "single_tag")) -> pure ()
++        other -> expectationFailure ("Expected Callout with single-quote tag, got: " <> show other)
++
++    it "parses numbered and tagged callouts (?Cn\"tag\")" $ do
++      case parsePCRE "(?C12\"marker\")" of
++        Right (Callout 12 (Just "marker")) -> pure ()
++        other -> expectationFailure ("Expected Callout 12 marker, got: " <> show other)
++
++    it "parses callouts interspersed in sequences" $ do
++      case parsePCRE "(?C1)a(?C2)b(?C3)" of
++        Right (Seq [Callout 1 Nothing, Lit 'a', Callout 2 Nothing, Lit 'b', Callout 3 Nothing]) -> pure ()
++        other -> expectationFailure ("Expected interspersed callout sequence, got: " <> show other)
++
++    it "compiles Callout to OpCallout / ICallout opcode" $ do
++      compileAST (Callout 7 (Just "probe")) `shouldBe` [OpCallout 7 (Just "probe")]
++      compileAST (Callout 7 (Just "probe")) `shouldBe` [ICallout 7 (Just "probe")]
++
++    it "reports Callout as nullable with 0 match length" $ do
++      let calloutNode = Callout 1 (Just "tag")
++      isNullableAST calloutNode `shouldBe` True
++      astMinLength calloutNode `shouldBe` 0
++      astMaxLength calloutNode `shouldBe` Just 0
++
++  describe "Lucene INTERVAL Numeric Range Syntax" $ do
++    it "parses parenthesized interval ranges (?<min..max>)" $ do
++      case parsePCRE "(?<0..100>)" of
++        Right (IntervalNat 0 100) -> pure ()
++        other -> expectationFailure ("Expected IntervalNat 0 100, got: " <> show other)
++      case parsePCRE "(?<1900..2099>)" of
++        Right (IntervalNat 1900 2099) -> pure ()
++        other -> expectationFailure ("Expected IntervalNat 1900 2099, got: " <> show other)
++
++    it "disambiguates (?<min..max>) from named capture groups (?<name>pattern)" $ do
++      case parsePCRE "(?<count>\\d+)" of
++        Right (Group (Just "count") Nothing (Repeat 1 Nothing RepGreedy (Class ClassDigit))) -> pure ()
++        other -> expectationFailure ("Expected named group, got: " <> show other)
++      case parsePCRE "(?<1..5>)" of
++        Right (IntervalNat 1 5) -> pure ()
++        other -> expectationFailure ("Expected IntervalNat 1 5, got: " <> show other)
++
++    it "rejects inverted intervals where min > max" $ do
++      case parsePCRE "(?<100..10>)" of
++        Left _ -> pure ()
++        Right ast -> expectationFailure ("Expected parse failure for 100..10, got: " <> show ast)
++
++    it "parses standalone interval syntax <min..max> when intervalFlag is enabled" $ do
++      let flags = enableIntervals defaultFlags
++      case parsePCREWithFlags flags "<1..255>" of
++        Right (IntervalNat 1 255) -> pure ()
++        other -> expectationFailure ("Expected IntervalNat 1 255 with intervalFlag, got: " <> show other)
++
++    it "parses <min..max> as literal/class sequence when intervalFlag is disabled" $ do
++      case parsePCRE "<1..255>" of
++        Right (Seq [Lit '<', Lit '1', Class ClassAny, Class ClassAny, Lit '2', Lit '5', Lit '5', Lit '>']) -> pure ()
++        other -> expectationFailure ("Expected literal sequence for <1..255> without flag, got: " <> show other)
++
++    it "compiles IntervalNat to OpRangeNat / IRangeNat opcode" $ do
++      compileAST (IntervalNat 10 99) `shouldBe` [OpRangeNat 10 99]
++      compileAST (IntervalNat 10 99) `shouldBe` [IRangeNat 10 99]
++
++    it "reports IntervalNat as non-nullable with digit bounds" $ do
++      let ivNode = IntervalNat 5 1000
++      isNullableAST ivNode `shouldBe` False
++      astMinLength ivNode `shouldBe` 1
++      astMaxLength ivNode `shouldBe` Just 4
+diff --git a/packages/smirk/test/VMSpec.hs b/packages/smirk/test/VMSpec.hs
+index d14ec4f..6bbf30f 100644
+--- a/packages/smirk/test/VMSpec.hs
++++ b/packages/smirk/test/VMSpec.hs
+@@ -158,3 +158,79 @@ spec = describe "Smirk.Engine.VM" $ do
+                 Nothing    -> expectationFailure "Expected toNonEmptyMatchResult"
+             Nothing -> expectationFailure "Expected execMatchNotEmpty to match"
+         Left e -> expectationFailure (show e)
++
++  describe "Lucene INTERVAL Execution & Numeric Range Scanning" $ do
++    it "matches numbers within inclusive natural interval [min..max]" $ do
++      case compileRegex "(?<0..100>)" of
++        Right reg -> do
++          case execMatch reg ("42" :: Text) of
++            Just res -> do
++              res.matchedSlice `shouldBe` "42"
++              res.matchLength `shouldBe` 2
++            Nothing -> expectationFailure "Expected match for 42"
++          case execMatch reg ("0" :: Text) of
++            Just res -> do
++              res.matchedSlice `shouldBe` "0"
++              res.matchLength `shouldBe` 1
++            Nothing -> expectationFailure "Expected match for 0"
++          case execMatch reg ("100" :: Text) of
++            Just res -> do
++              res.matchedSlice `shouldBe` "100"
++              res.matchLength `shouldBe` 3
++            Nothing -> expectationFailure "Expected match for 100"
++        Left e -> expectationFailure (show e)
++
++    it "rejects numbers outside the specified natural interval" $ do
++      case compileRegex "(?<10..50>)" of
++        Right reg -> do
++          execMatch reg ("9" :: Text) `shouldBe` Nothing
++          execMatch reg ("51" :: Text) `shouldBe` Nothing
++          execMatch reg ("500" :: Text) `shouldBe` Nothing
++        Left e -> expectationFailure (show e)
++
++    it "matches composite date formats using chained intervals" $ do
++      case compileRegex "(?<1900..2099>)-(?<1..12>)-(?<1..31>)" of
++        Right reg -> do
++          case execMatch reg ("Date: 2026-11-08 recorded" :: Text) of
++            Just res -> do
++              res.matchedSlice `shouldBe` "2026-11-08"
++              res.matchOffset `shouldBe` 6
++              res.matchLength `shouldBe` 10
++            Nothing -> expectationFailure "Expected match for date"
++        Left e -> expectationFailure (show e)
++
++    it "matches standalone <min..max> syntax when intervalFlag is enabled" $ do
++      case compileRegexWithFlags (enableIntervals defaultFlags) "<0..255>" of
++        Right reg -> do
++          case execMatch reg ("octet 192 in ip" :: Text) of
++            Just res -> res.matchedSlice `shouldBe` "192"
++            Nothing -> expectationFailure "Expected match for 192"
++        Left e -> expectationFailure (show e)
++
++    it "scanWord64 correctly extracts unsigned 64-bit values and lengths" $ do
++      scanWord64 ("42abc" :: Text) 0 `shouldBe` (Just 42, 2)
++      scanWord64 ("0" :: Text) 0 `shouldBe` (Just 0, 1)
++      scanWord64 ("007" :: Text) 0 `shouldBe` (Just 7, 3)
++      scanWord64 ("non-digit" :: Text) 0 `shouldBe` (Nothing, 0)
++
++  describe "PCRE Callout VM Execution" $ do
++    it "executes across callouts as zero-width inspection hooks" $ do
++      case compileRegex "(?C)hello(?C1)" of
++        Right reg -> do
++          case execMatch reg ("say hello now" :: Text) of
++            Just res -> do
++              res.matchedSlice `shouldBe` "hello"
++              res.matchOffset `shouldBe` 4
++            Nothing -> expectationFailure "Expected match for hello with callouts"
++        Left e -> expectationFailure (show e)
++
++    it "preserves thread state and captures across interspersed tagged callouts" $ do
++      case compileRegex "(?C\"start\")(?<tag>[a-z0-9]+)(?C2\"mid\"):(?<val>\\d+)(?C\"end\")" of
++        Right reg -> do
++          case execMatch reg ("item: val42:99" :: Text) of
++            Just res -> do
++              res.matchedSlice `shouldBe` "val42:99"
++              Map.lookup "tag" res.namedGroups `shouldBe` Just "val42"
++              Map.lookup "val" res.namedGroups `shouldBe` Just "99"
++            Nothing -> expectationFailure "Expected match for tagged callouts pattern"
++        Left e -> expectationFailure (show e)

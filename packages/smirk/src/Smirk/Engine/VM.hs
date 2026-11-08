@@ -64,13 +64,15 @@ module Smirk.Engine.VM
   , lookupNamedCaptureRep
   , stepVM
   , stepVMWithMode
+  , scanWord64
   , matchClass
   , matchAnchor
   ) where
 
-import Data.Char (isAlphaNum, isDigit, isSpace)
+import Data.Char (isAlphaNum, isDigit, isSpace, ord)
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
+import Data.Word (Word64)
 
 import Smirk.Core.AST (Anchor (..), CharClass (..), CharRange (..))
 import Smirk.Core.Bytecode (Opcode (..), Regex (..))
@@ -301,6 +303,16 @@ stepVMWithMode mode regex target startIdx th stack steps fuel =
                         else backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
                  _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
 
+             OpRangeNat minVal maxVal ->
+               case scanWord64 target th.strIdx of
+                 (Just val, !len) | val >= minVal && val <= maxVal ->
+                   stepVMWithMode mode regex target startIdx th { pc = pc' + 1, strIdx = th.strIdx + len } stack (steps + 1) fuel
+                 _ -> backtrackOrNextStart mode regex target startIdx stack (steps + 1) fuel
+
+             OpCallout _num _tag ->
+               -- PCRE Callout: zero-width inspection hook [ref:note-pcre-callout-syntax]
+               stepVMWithMode mode regex target startIdx th { pc = pc' + 1 } stack (steps + 1) fuel
+
              OpMatch ->
                let res = buildResult regex target th (steps + 1)
                in case mode of
@@ -398,3 +410,27 @@ matchAnchor anchor idx target = case anchor of
     in prevIsWord /= currIsWord
   AnchorNotWordBoundary ->
     not (matchAnchor AnchorWordBoundary idx target)
+
+-- | Scan contiguous ASCII decimal digits starting at offset 'start' and compute
+-- the 64-bit unsigned natural number value and character length.
+-- Returns @(Just val, length)@ on successful scan without overflow, or
+-- @(Nothing, length)@ if no digits exist or overflow occurred.
+-- Executes deterministically in $O(\text{digits})$ time with zero allocation.
+-- [ref:note-lucene-interval-syntax]
+scanWord64 :: RegexTarget s => s -> Int -> (Maybe Word64, Int)
+scanWord64 target start = go start 0 0
+  where
+    go idx !acc !count =
+      case seqIndex target idx of
+        Just c | isDigit c ->
+          let d = fromIntegral (ord c - ord '0') :: Word64
+              overflow = acc > (maxBound - d) `div` 10
+          in if overflow
+               then (Nothing, count + 1 + countRest (idx + 1))
+               else go (idx + 1) (acc * 10 + d) (count + 1)
+        _ -> if count == 0 then (Nothing, 0) else (Just acc, count)
+
+    countRest idx =
+      case seqIndex target idx of
+        Just c | isDigit c -> 1 + countRest (idx + 1)
+        _                  -> 0

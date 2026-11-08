@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 {- |
 Module      : Smirk.Core.Bytecode
@@ -9,10 +10,14 @@ License     : Apache-2.0
 Defines the low-level virtual machine bytecode instruction set ('Opcode')
 used by the Pike-style non-backtracking / thread-stepped VM in 'Smirk.Engine.VM'.
 Includes relative jumping, nondeterministic thread branching ('OpSplit'),
-capture slot registers ('OpSaveStart', 'OpSaveEnd'), and lookaround subprograms.
+capture slot registers ('OpSaveStart', 'OpSaveEnd'), lookaround subprograms,
+Lucene numeric natural intervals ('OpRangeNat' / 'IRangeNat'), and PCRE
+callout hooks ('OpCallout' / 'ICallout').
 -}
 module Smirk.Core.Bytecode
   ( Opcode (..)
+  , pattern IRangeNat
+  , pattern ICallout
   , Program
   , Regex (..)
   ) where
@@ -20,6 +25,7 @@ module Smirk.Core.Bytecode
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Data.Vector (Vector)
+import Data.Word (Word64)
 import GHC.Generics (Generic)
 
 import Smirk.Core.AST (Anchor, CharClass)
@@ -36,8 +42,23 @@ data Opcode
   | OpAssertLookahead !(Vector Opcode) !Bool       -- ^ Zero-width lookahead assertion: subprogram and polarity
   | OpAssertLookbehind !(Vector Opcode) !Bool      -- ^ Zero-width lookbehind assertion: subprogram and polarity
   | OpMatchBackRef !Int                            -- ^ Match dynamic slice previously captured by group $n$
+  | OpRangeNat !Word64 !Word64                     -- ^ Lucene-style decimal natural interval [min..max] [ref:note-lucene-interval-syntax]
+  | OpCallout !Int !(Maybe Text)                   -- ^ PCRE Callout hook with callout index and optional tag [ref:note-pcre-callout-syntax]
   | OpMatch                                        -- ^ Successful match reached; terminate thread
   deriving (Eq, Show, Generic)
+
+-- | Pattern synonym for Lucene-style decimal natural interval bytecode instruction.
+-- Matches decimal numerals whose numerical value is within $[ \text{min}, \text{max} ]$
+-- in $O(\text{digits})$ time with zero backtracking.
+-- [ref:note-lucene-interval-syntax]
+pattern IRangeNat :: Word64 -> Word64 -> Opcode
+pattern IRangeNat lo hi = OpRangeNat lo hi
+
+-- | Pattern synonym for PCRE callout bytecode instruction.
+-- Represents a zero-width inspection hook carrying a numeric identifier and optional tag.
+-- [ref:note-pcre-callout-syntax]
+pattern ICallout :: Int -> Maybe Text -> Opcode
+pattern ICallout num tag = OpCallout num tag
 
 -- | Compiled bytecode sequence indexed as a contiguous vector.
 type Program = Vector Opcode

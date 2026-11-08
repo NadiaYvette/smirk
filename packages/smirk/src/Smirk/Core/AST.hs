@@ -20,9 +20,11 @@ module Smirk.Core.AST
   , LookDir (..)
   , Flags (..)
   , defaultFlags
+  , enableIntervals
   ) where
 
 import Data.Text (Text)
+import Data.Word (Word64)
 import GHC.Generics (Generic)
 
 -- | Regex compilation and matching flags controlling parser and VM semantics.
@@ -30,15 +32,21 @@ data Flags = Flags
   { caseInsensitive :: !Bool -- ^ (?i) Case-insensitive character matching
   , dotAll          :: !Bool -- ^ (?s) Dot matches newline characters as well
   , multiline       :: !Bool -- ^ (?m) ^ and $ match at beginning and end of each line
+  , intervalFlag    :: !Bool -- ^ Lucene INTERVAL syntax mode (<min..max>)
   } deriving (Eq, Show, Generic)
 
--- | Default flags (standard PCRE mode: case-sensitive, no dotAll, no multiline).
+-- | Default flags (standard PCRE mode: case-sensitive, no dotAll, no multiline, no standalone intervals).
 defaultFlags :: Flags
 defaultFlags = Flags
   { caseInsensitive = False
   , dotAll          = False
   , multiline       = False
+  , intervalFlag    = False
   }
+
+-- | Enable Lucene INTERVAL standalone syntax mode (@<min..max>@) in 'Flags'.
+enableIntervals :: Flags -> Flags
+enableIntervals f = f { intervalFlag = True }
 
 -- | Character range within a character set ([a-z], [0-9]).
 data CharRange
@@ -92,5 +100,7 @@ data AST
   | Lookaround !LookDir !Bool !AST               -- ^ Zero-width lookaround assertion: direction, positive/negative, and inner AST
   | BackRef !Int                                 -- ^ Numbered backreference: @\\1@
   | NamedBackRef !Text                           -- ^ Named backreference: @\\k<name>@
+  | IntervalNat !Word64 !Word64                  -- ^ Decimal natural interval: @(?<min..max>)@ or @<min..max>@
+  | Callout !Int !(Maybe Text)                   -- ^ PCRE Callout inspection point: @(?C)@, @(?Cn)@, @(?C"tag")@
   | Empty                                        -- ^ Empty / epsilon AST node
   deriving (Eq, Show, Generic)

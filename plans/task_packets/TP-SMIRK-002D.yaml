@@ -1,0 +1,9 @@
+id: TP-SMIRK-002D
+title: "Lucene INTERVAL Numeric Range & PCRE Callout Syntax"
+description: |
+  Lucene INTERVAL Numeric Range & PCRE Callout Syntax
+packages:
+  - smirk
+executor: script
+max_repair_attempts: 3
+allow_metered: false

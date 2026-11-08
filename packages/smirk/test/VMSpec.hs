@@ -158,3 +158,79 @@ spec = describe "Smirk.Engine.VM" $ do
                 Nothing    -> expectationFailure "Expected toNonEmptyMatchResult"
             Nothing -> expectationFailure "Expected execMatchNotEmpty to match"
         Left e -> expectationFailure (show e)
+
+  describe "Lucene INTERVAL Execution & Numeric Range Scanning" $ do
+    it "matches numbers within inclusive natural interval [min..max]" $ do
+      case compileRegex "(?<0..100>)" of
+        Right reg -> do
+          case execMatch reg ("42" :: Text) of
+            Just res -> do
+              res.matchedSlice `shouldBe` "42"
+              res.matchLength `shouldBe` 2
+            Nothing -> expectationFailure "Expected match for 42"
+          case execMatch reg ("0" :: Text) of
+            Just res -> do
+              res.matchedSlice `shouldBe` "0"
+              res.matchLength `shouldBe` 1
+            Nothing -> expectationFailure "Expected match for 0"
+          case execMatch reg ("100" :: Text) of
+            Just res -> do
+              res.matchedSlice `shouldBe` "100"
+              res.matchLength `shouldBe` 3
+            Nothing -> expectationFailure "Expected match for 100"
+        Left e -> expectationFailure (show e)
+
+    it "rejects numbers outside the specified natural interval" $ do
+      case compileRegex "(?<10..50>)" of
+        Right reg -> do
+          execMatch reg ("9" :: Text) `shouldBe` Nothing
+          execMatch reg ("51" :: Text) `shouldBe` Nothing
+          execMatch reg ("500" :: Text) `shouldBe` Nothing
+        Left e -> expectationFailure (show e)
+
+    it "matches composite date formats using chained intervals" $ do
+      case compileRegex "(?<1900..2099>)-(?<1..12>)-(?<1..31>)" of
+        Right reg -> do
+          case execMatch reg ("Date: 2026-11-08 recorded" :: Text) of
+            Just res -> do
+              res.matchedSlice `shouldBe` "2026-11-08"
+              res.matchOffset `shouldBe` 6
+              res.matchLength `shouldBe` 10
+            Nothing -> expectationFailure "Expected match for date"
+        Left e -> expectationFailure (show e)
+
+    it "matches standalone <min..max> syntax when intervalFlag is enabled" $ do
+      case compileRegexWithFlags (enableIntervals defaultFlags) "<0..255>" of
+        Right reg -> do
+          case execMatch reg ("octet 192 in ip" :: Text) of
+            Just res -> res.matchedSlice `shouldBe` "192"
+            Nothing -> expectationFailure "Expected match for 192"
+        Left e -> expectationFailure (show e)
+
+    it "scanWord64 correctly extracts unsigned 64-bit values and lengths" $ do
+      scanWord64 ("42abc" :: Text) 0 `shouldBe` (Just 42, 2)
+      scanWord64 ("0" :: Text) 0 `shouldBe` (Just 0, 1)
+      scanWord64 ("007" :: Text) 0 `shouldBe` (Just 7, 3)
+      scanWord64 ("non-digit" :: Text) 0 `shouldBe` (Nothing, 0)
+
+  describe "PCRE Callout VM Execution" $ do
+    it "executes across callouts as zero-width inspection hooks" $ do
+      case compileRegex "(?C)hello(?C1)" of
+        Right reg -> do
+          case execMatch reg ("say hello now" :: Text) of
+            Just res -> do
+              res.matchedSlice `shouldBe` "hello"
+              res.matchOffset `shouldBe` 4
+            Nothing -> expectationFailure "Expected match for hello with callouts"
+        Left e -> expectationFailure (show e)
+
+    it "preserves thread state and captures across interspersed tagged callouts" $ do
+      case compileRegex "(?C\"start\")(?<tag>[a-z0-9]+)(?C2\"mid\"):(?<val>\\d+)(?C\"end\")" of
+        Right reg -> do
+          case execMatch reg ("item: val42:99" :: Text) of
+            Just res -> do
+              res.matchedSlice `shouldBe` "val42:99"
+              Map.lookup "tag" res.namedGroups `shouldBe` Just "val42"
+              Map.lookup "val" res.namedGroups `shouldBe` Just "99"
+            Nothing -> expectationFailure "Expected match for tagged callouts pattern"
+        Left e -> expectationFailure (show e)

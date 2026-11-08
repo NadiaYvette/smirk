@@ -85,6 +85,8 @@ isNullableAST = \case
   Lookaround {}           -> True
   BackRef _               -> True
   NamedBackRef _          -> True
+  IntervalNat _ _         -> False
+  Callout _ _             -> True
   Empty                   -> True
 
 -- | Statically calculate the minimum character match length of an AST.
@@ -101,6 +103,8 @@ astMinLength = \case
   Lookaround {}           -> 0
   BackRef _               -> 0
   NamedBackRef _          -> 0
+  IntervalNat minVal _    -> max 1 (length (show minVal))
+  Callout _ _             -> 0
   Empty                   -> 0
 
 -- | Statically calculate the maximum character match length of an AST,
@@ -124,6 +128,8 @@ astMaxLength = \case
   Lookaround {}           -> Just 0
   BackRef _               -> Nothing
   NamedBackRef _          -> Nothing
+  IntervalNat _ maxVal    -> Just (length (show maxVal))
+  Callout _ _             -> Just 0
   Empty                   -> Just 0
   where
     sumMaybes [] = Just 0

@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 {- |
 Module      : Smirk
 Description : Pure, effectful, resumable, step-budgeted PCRE interpreter for Haskell
@@ -34,6 +36,7 @@ module Smirk
   , compileNonEmptyRegex
   , Flags (..)
   , defaultFlags
+  , enableIntervals
   , testMatch
   , execMatch
   , execMatchNotEmpty
@@ -75,11 +78,14 @@ module Smirk
 
     -- * Compiler & Bytecode
   , Opcode (..)
+  , pattern IRangeNat
+  , pattern ICallout
   , Program
   , parsePCRE
   , parsePCREWithFlags
   , compileAST
   , compileToRegex
+  , scanWord64
 
     -- * Execution & VM Modes
   , RegexTarget (..)
