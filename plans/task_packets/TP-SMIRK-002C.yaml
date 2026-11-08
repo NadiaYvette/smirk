@@ -1,0 +1,39 @@
+id: "TP-SMIRK-002C"
+title: "Smirk Core Cursor — Linear & Graded Modal Input Cursor Discipline"
+packages:
+  - "smirk"
+executor: "auto"
+model: "gemini-3.5-flash-lite"
+max_turns: 8
+run_budget: 600
+max_repair_attempts: 4
+allow_metered: false
+description: |
+  Implement linear continuation execution discipline under -XLinearTypes and
+  Granule-style graded lookbehind input cursors for streaming regular expressions.
+
+  ### Concrete Deliverables:
+  1. In `packages/smirk/smirk.cabal`:
+     - Expose `Smirk.Core.Cursor`.
+     - Add `CursorSpec` to `test-suite smirk-test`'s `other-modules`.
+  2. In `packages/smirk/src/Smirk/Core/Cursor.hs`:
+     - Provide single-shot linear continuation resumption:
+       `resumeLinear :: RegexTarget s => MatchContinuation s %1 -> Fuel -> MatchOutcome s`
+       under `-XLinearTypes`, guaranteeing at compile time that an in-flight continuation cannot be duplicated or re-run.
+     - Provide `ResumeLinear s` and `LinearContinuation s` wrappers (`mkResumeLinear`, `resumeLinearCont`).
+     - Define `MatchOutcome s` encapsulating `MatchStatus s` (preparing for multi-resource metrics in TP-SMIRK-002E).
+     - Define `EvacuatedBytes` representing reclaimed UTF-8 bytes from streaming buffers.
+     - Define Granule-style `GradedCursor (horizon :: Nat) s` tracking type-level lookbehind bounds $w$.
+     - Implement `evacuatePrefix :: forall (w :: Nat) s. (KnownNat w, RegexTarget s) => GradedCursor w s -> (EvacuatedBytes, GradedCursor w s)`
+       safely dropping dead prefix characters preceding the lookbehind horizon `(cursorMinActiveOffset - w)`.
+     - Implement `cursorFromContinuation`, `minimumActiveOffset`, `safeEvacuationHorizon`, `advanceMinActive`,
+       `cursorRemainingLength`, `cursorSlice`, `cursorToRelativeOffset`, and `cursorFromRelativeOffset`.
+  3. In `packages/smirk/src/Smirk/Core/Types.hs`:
+     - Add `deriving stock (Eq, Show, Generic)` to `MatchContinuation s` and `MatchStatus s`.
+  4. In `packages/smirk/src/Smirk.hs`:
+     - Re-export `Smirk.Core.Cursor` types and functions.
+  5. In `packages/smirk/test/CursorSpec.hs` and `packages/smirk/test/Spec.hs`:
+     - Provide comprehensive unit tests verifying linear continuation resumption, GradedCursor horizon tracking,
+       prefix evacuation across Text and ByteString, and memory reclamation with lookbehind bounds.
+  6. Note: You may execute `sh scripts/tasks/TP-SMIRK-002C.sh` to apply the implementation scaffold,
+     then verify cleanly using `./scripts/tasks/TP-SMIRK-002C-verify.sh`.
