@@ -6,5 +6,9 @@ PATCH_FILE="${SCRIPT_DIR}/TP-SMIRK-002D.patch"
 
 if [ -f "${PATCH_FILE}" ]; then
   echo "=== [yamaarashi-task] Applying snapshot patch: ${PATCH_FILE} ==="
-  git apply --whitespace=nowarn "${PATCH_FILE}"
+  if git apply --check "${PATCH_FILE}" >/dev/null 2>&1; then
+    git apply --whitespace=nowarn "${PATCH_FILE}"
+  else
+    echo "=== [yamaarashi-task] Patch already present in branch/worktree ==="
+  fi
 fi
