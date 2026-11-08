@@ -1,0 +1,46 @@
+id: "TP-SMIRK-002A"
+title: "Smirk Core Types & Flat SmallArray / Polytropos Capture Layouts"
+packages:
+  - "smirk"
+executor: "auto"
+model: "gemini-3.5-flash-lite"
+max_turns: 8
+run_budget: 600
+max_repair_attempts: 4
+allow_metered: false
+description: |
+  Replace association-list / map capture storage in the Pike VM hot loop with unboxed
+  `PrimArray Int` offset pairs `(startOffset, endOffset)` and `SmallArray` / `Polytropos.Core.Rep`
+  named capture projections. Add `utf8ByteLength :: s -> Int` and `utf8SliceByteWidth` methods to
+  `RegexTarget s` so physical storage footprint is $O(1)$ on `Text` and `ByteString` without
+  $O(n)$ character counting.
+
+  ### Concrete Deliverables:
+  1. In `packages/smirk/smirk.cabal`:
+     - Add dependencies `polytropos-core >= 0.1` and `primitive >= 0.7 && < 0.10`.
+     - Expose `Smirk.Core.Types`.
+     - Add dependencies `polytropos-core` and `primitive` to `test-suite smirk-test`.
+  2. In `packages/smirk/src/Smirk/Engine/Sequence.hs`:
+     - Add `utf8ByteLength :: s -> Int` and `utf8SliceByteWidth :: Int -> Int -> s -> Int` to `RegexTarget`.
+     - Implement $O(1)$ byte length indexing for `Text` (via `Data.Text.Foreign.lengthWord8`) and `ByteString`.
+     - Provide UTF-8 byte width calculations for `[Char]`, `Seq Char`, and `Vector Char`.
+  3. In `packages/smirk/src/Smirk/Core/Types.hs`:
+     - Define `CaptureSlots` backed by unboxed `PrimArray Int` offset pairs `(startOffset, endOffset)`.
+     - Implement `emptyCaptureSlots`, `captureSlotsCount`, `getCaptureStart`, `getCaptureEnd`, `getCaptureSpan`,
+       `setCaptureStart`, `setCaptureEnd`, `toCaptureMap`, `toFullMatchSpan`.
+     - Implement Polytropos named projections `toNamedCaptureSmallArray`, `toNamedCaptureRep`,
+       `matchNamedCaptureRep`, `lookupNamedCaptureRep`.
+     - Move VM runtime types `Fuel`, `MatchResult`, `ThreadState`, `MatchContinuation`, `MatchStatus`
+       to `Smirk.Core.Types`.
+  4. In `packages/smirk/src/Smirk/Engine/VM.hs`:
+     - Refactor Pike VM hot loop (`stepVM`, `runMatchAt`, `backtrackOrNextStart`, `buildResult`)
+       to operate over unboxed `CaptureSlots`.
+  5. In `packages/smirk/src/Smirk.hs`:
+     - Re-export `CaptureSlots(..)`, `emptyCaptureSlots`, `getCaptureStart`, `getCaptureEnd`,
+       `getCaptureSpan`, `toCaptureMap`, `toFullMatchSpan`, `toNamedCaptureSmallArray`,
+       `toNamedCaptureRep`, `matchNamedCaptureRep`, `lookupNamedCaptureRep`.
+  6. In `packages/smirk/test/SequenceSpec.hs` and `packages/smirk/test/VMSpec.hs`:
+     - Add test coverage for `utf8ByteLength`, `utf8SliceByteWidth`, unboxed `CaptureSlots`, and
+       `Polytropos.Core.Rep` named capture projections.
+  7. Note: You may execute `sh scripts/tasks/TP-SMIRK-002A.sh` to apply the implementation scaffold,
+     then verify cleanly using `./scripts/tasks/TP-SMIRK-002A-verify.sh`.

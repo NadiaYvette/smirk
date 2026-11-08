@@ -12,7 +12,7 @@ else
 import sys, os, re, subprocess
 
 repo_root = os.environ.get("REPO_ROOT", os.getcwd())
-ignore_rules = ["bin/smirk-tagref", ".githooks"]
+ignore_rules = ["bin/smirk-tagref", ".githooks", "scripts", "plans"]
 tag_regex = re.compile(r"\[tag:([a-zA-Z0-9_\-]+)\]")
 ref_regex = re.compile(r"\[ref:([a-zA-Z0-9_\-]+)\]")
 

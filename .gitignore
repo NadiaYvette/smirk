@@ -7,3 +7,5 @@ dist-newstyle/
 .stack-work/
 cabal.project.local
 tags
+.yamaarashi/
+.ok/

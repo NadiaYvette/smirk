@@ -4,3 +4,5 @@
 ignore_rules:
   - "bin/smirk-tagref"
   - ".githooks"
+  - "scripts"
+  - "plans"
