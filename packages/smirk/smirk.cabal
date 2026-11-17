@@ -72,6 +72,7 @@ library
         Smirk.Engine.VM
         Smirk.Glob
         Smirk.Continuation.Batch
+        Smirk.Continuation.NetworkFilter
     build-depends:
         base >= 4.16 && < 5,
         containers >= 0.6 && < 1,
@@ -99,6 +100,7 @@ test-suite smirk-test
         QuoteSpec
         GlobSpec
         BatchSpec
+        NetworkFilterSpec
     build-depends:
         base >= 4.16 && < 5,
         bytestring >= 0.11 && < 1,

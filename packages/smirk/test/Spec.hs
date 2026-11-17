@@ -9,6 +9,7 @@ import qualified SequenceSpec
 import qualified QuoteSpec
 import qualified GlobSpec
 import qualified BatchSpec
+import qualified NetworkFilterSpec
 
 main :: IO ()
 main = hspec $ do
@@ -20,3 +21,4 @@ main = hspec $ do
   QuoteSpec.spec
   GlobSpec.spec
   BatchSpec.spec
+  NetworkFilterSpec.spec

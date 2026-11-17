@@ -54,6 +54,7 @@ module Smirk
 
     -- * Continuation Batching
   , module Smirk.Continuation.Batch
+  , module Smirk.Continuation.NetworkFilter
 
     -- * QuasiQuoters & Editors
   , re
@@ -191,6 +192,7 @@ import Smirk.Engine.Sequence
 import Smirk.Engine.VM
 import Smirk.Glob
 import Smirk.Continuation.Batch
+import Smirk.Continuation.NetworkFilter
 
 -- | Compile a PCRE regular expression string into a runnable 't:Regex'.
 -- Returns a parse error description as 'Left' on failure.
