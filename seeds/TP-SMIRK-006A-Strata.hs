@@ -1,6 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 {- |
 Module      : Smirk.Core.Strata
@@ -38,7 +37,7 @@ module Smirk.Core.Strata
   ) where
 
 import Data.Bits ((.&.), (.|.), setBit, testBit)
-import Data.Char (ord)
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit, isSpace)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Vector (Vector)
@@ -58,60 +57,68 @@ data LanguageStratum
 -- | Classify an Abstract Syntax Tree into its minimal required language stratum.
 --
 -- Traverses the AST structurally, computing the least upper bound in the stratum lattice:
---   StratumRegular < StratumCFG < StratumBackref
+-- StratumRegular < StratumCFG < StratumBackref.
 classifyAST :: AST -> LanguageStratum
 classifyAST = \case
-  Lit _                -> StratumRegular
-  Class _              -> StratumRegular
-  AnchorAssert _       -> StratumRegular
-  Empty                -> StratumRegular
-  IntervalNat _ _      -> StratumRegular
-  Callout _ _          -> StratumRegular
-  Seq xs               -> foldl max StratumRegular (map classifyAST xs)
-  Alt xs               -> foldl max StratumRegular (map classifyAST xs)
-  Repeat _ _ _ a       -> classifyAST a
-  Group _ _ a          -> classifyAST a
-  NonCapturing a       -> classifyAST a
-  Lookaround _ _ a     -> classifyAST a
-  BackRef _            -> StratumBackref
-  NamedBackRef _       -> StratumBackref
+  BackRef _ -> StratumBackref
+  NamedBackRef _ -> StratumBackref
+  Callout _ _ -> StratumCFG
+  Seq xs -> foldl max StratumRegular (map classifyAST xs)
+  Alt xs -> foldl max StratumRegular (map classifyAST xs)
+  Repeat _ _ _ child -> classifyAST child
+  Group _ _ child -> classifyAST child
+  NonCapturing child -> classifyAST child
+  Lookaround _ _ child -> classifyAST child
+  Lit _ -> StratumRegular
+  Class _ -> StratumRegular
+  AnchorAssert _ -> StratumRegular
+  IntervalNat _ _ -> StratumRegular
+  Empty -> StratumRegular
 
--- | Glushkov Bit-Parallel NFA executing over Word64 state bitmasks.
+-- | Unboxed Word64-backed Glushkov non-deterministic finite automaton.
 --
--- Represents an unboxed non-deterministic finite automaton with up to 64 positions.
+-- Restricts regular patterns to <= 64 positions for bit-parallel O(1) state representation.
 data GlushkovNFA = GlushkovNFA
-  { gPosCount       :: !Int                 -- ^ Number of literal/class positions (<= 64)
-  , gInitialStates  :: {-# UNPACK #-} !Word64 -- ^ Positions reachable on the first character
-  , gFinalStates    :: {-# UNPACK #-} !Word64 -- ^ Positions that accept the match
-  , gNullable       :: !Bool                -- ^ True if epsilon is accepted
-  , gFollow         :: !(Vector Word64)     -- ^ Follow table: follow(pos)
-  , gMatchPos       :: !(Vector (Char -> Bool)) -- ^ Character predicates for each position
-  }
+  { gPosCount       :: !Int
+  -- ^ Number of syntactic positions (<= 64)
+  , gInitialStates  :: !Word64
+  -- ^ Bitmask of initial active positions
+  , gFinalStates    :: !Word64
+  -- ^ Bitmask of accepting positions
+  , gFollow         :: !(Vector Word64)
+  -- ^ Flat follow-set transition table indexed by position
+  , gMatchPos       :: !(Vector (Char -> Bool))
+  -- ^ Position character acceptance predicates
+  , gNullable       :: !Bool
+  -- ^ True if epsilon is accepted
+  } deriving (Generic)
 
--- | Compiles a regular AST into a Glushkov bit-parallel NFA if position count <= 64.
+-- | Compile a StratumRegular AST into a GlushkovNFA.
+--
+-- Returns Nothing if the pattern exceeds 64 positions or requires CFG/backreferences.
 compileGlushkov :: AST -> Maybe GlushkovNFA
 compileGlushkov ast
   | classifyAST ast /= StratumRegular = Nothing
   | otherwise =
-      let (posList, nullable, firstSet, lastSet, followPairs) = linearize ast 0
-          n = length posList
+      let (positions, nullable, firstSet, lastSet, followPairs) = linearize ast 0
+          n = length positions
       in if n > 64
            then Nothing
            else
-             let followVec = buildFollowTable n followPairs
-                 predVec   = V.fromList (map snd posList)
-                 initMask  = toMask firstSet
-                 finalMask = toMask lastSet
+             let initialMask = toMask firstSet
+                 finalMask   = toMask lastSet
+                 followVec   = buildFollowTable n followPairs
+                 matchVec    = V.fromList (map snd positions)
              in Just GlushkovNFA
                   { gPosCount      = n
-                  , gInitialStates = initMask
+                  , gInitialStates = initialMask
                   , gFinalStates   = finalMask
-                  , gNullable      = nullable
                   , gFollow        = followVec
-                  , gMatchPos      = predVec
+                  , gMatchPos      = matchVec
+                  , gNullable      = nullable
                   }
 
--- | Linearize an AST into positions, nullability, first positions, last positions, and follow edges.
+-- | Linearize regular AST into position-annotated tokens.
 --
 -- Returns (positions, nullable, firstSet, lastSet, followPairs).
 linearize :: AST -> Int -> ([(Int, Char -> Bool)], Bool, [Int], [Int], [(Int, Int)])
@@ -126,10 +133,9 @@ linearize ast startIdx = case ast of
     let p = startIdx
         predFn = matchesClass cls
     in ([(p, predFn)], False, [p], [p], [])
-  IntervalNat lo hi ->
-    -- Abstract as range digits
+  IntervalNat _ _ ->
     let p = startIdx
-        predFn c = c >= '0' && c <= '9'
+        predFn = isDigit
     in ([(p, predFn)], False, [p], [p], [])
   Seq xs ->
     foldl mergeSeq ([], True, [], [], []) (linearizeList xs startIdx)
@@ -165,12 +171,12 @@ linearize ast startIdx = case ast of
 matchesClass :: CharClass -> Char -> Bool
 matchesClass cls c = case cls of
   ClassAny -> c /= '\n'
-  ClassDigit -> c >= '0' && c <= '9'
-  ClassNotDigit -> not (c >= '0' && c <= '9')
-  ClassWord -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
-  ClassNotWord -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')
-  ClassSpace -> c == ' ' || c == '\t' || c == '\n' || c == '\r'
-  ClassNotSpace -> not (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+  ClassDigit -> isDigit c
+  ClassNotDigit -> not (isDigit c)
+  ClassWord -> isAsciiLower c || isAsciiUpper c || isDigit c || c == '_'
+  ClassNotWord -> not (isAsciiLower c || isAsciiUpper c || isDigit c || c == '_')
+  ClassSpace -> isSpace c
+  ClassNotSpace -> not (isSpace c)
   ClassSet ranges negated ->
     let inRange (RangeSingle ch) = c == ch
         inRange (RangeBetween lo hi) = c >= lo && c <= hi
@@ -209,12 +215,11 @@ matchGlushkov :: GlushkovNFA -> String -> Bool
 matchGlushkov nfa@GlushkovNFA{..} input = case input of
   [] -> gNullable
   (c:cs) ->
-    let -- Start by matching the initial positions on the first character
-        initActive = gInitialStates
+    let initActive = gInitialStates
         loop !mask [] = (mask .&. gFinalStates) /= 0
         loop !mask (ch:chs) =
           let nextMask = stepGlushkov nfa mask ch
-          in if nextMask == 0 then False else loop nextMask chs
+          in nextMask /= 0 && loop nextMask chs
         firstMask =
           let seedLoop !acc !p
                 | p >= gPosCount = acc
@@ -223,10 +228,10 @@ matchGlushkov nfa@GlushkovNFA{..} input = case input of
                         acc' = if matches then acc .|. (gFollow V.! p) else acc
                     in seedLoop acc' (p + 1)
                 | otherwise = seedLoop acc (p + 1)
-              directFirst = if (initActive .&. gFinalStates) /= 0 && null cs then True else False
+              directFirst = (initActive .&. gFinalStates) /= 0 && null cs
           in (seedLoop 0 0, directFirst)
     in case cs of
-         [] -> (initActive .&. gFinalStates) /= 0 && (any (\p -> testBit initActive p && (gMatchPos V.! p) c) [0..gPosCount - 1])
+         [] -> (initActive .&. gFinalStates) /= 0 && any (\p -> testBit initActive p && (gMatchPos V.! p) c) [0..gPosCount - 1]
          _  -> loop (fst firstMask) cs
 
 -- | Execute Glushkov bit-parallel matching over a Data.Text input.

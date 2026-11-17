@@ -1,6 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 {- |
 Module      : Smirk.Core.DPO
@@ -76,7 +76,7 @@ optimizeRegexDPO r = r { program = optimizeBytecodeDPO (program r) }
 
 -- | Optimize a Bytecode Program via iterative Double Pushout fixed-point rewriting.
 optimizeBytecodeDPO :: Program -> Program
-optimizeBytecodeDPO initialProg = fixpoint initialProg
+optimizeBytecodeDPO = fixpoint
   where
     fixpoint !p =
       let p1 = threadJumps p
@@ -118,9 +118,9 @@ fuseClasses prog =
               -- Pattern: OpSplit 1 3; OpChar c1; OpJump 2; OpChar c2
               (OpSplit 1 3, OpChar c1, OpJump 2, OpChar c2) ->
                 let fusedClass = ClassSet [RangeSingle c1, RangeSingle c2] False
-                in [OpClass fusedClass, OpJump 1] ++ go (idx + 4)
+                in OpClass fusedClass : OpJump 1 : go (idx + 4)
               (op, _, _, _) -> op : go (idx + 1)
-        | idx < n = [prog V.! idx] ++ go (idx + 1)
+        | idx < n = (prog V.! idx) : go (idx + 1)
         | otherwise = []
   in if n >= 4 then V.fromList (go 0) else prog
 
@@ -128,11 +128,11 @@ fuseClasses prog =
 --
 -- Replaces OpJump 1 (jumping to immediate next instruction) with redundant no-op bypass.
 pruneEpsilons :: Program -> Program
-pruneEpsilons prog =
+pruneEpsilons =
   V.map (\case
     OpJump 1 -> OpJump 1 -- identity retained for address alignment
     op       -> op
-  ) prog
+  )
 
 -- | Rule 4: Dead Code Elimination
 --

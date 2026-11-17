@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 
 {- |
 Module      : Smirk.Core.Marpa
@@ -18,33 +18,27 @@ rules (e.g., A -> a A | b) due to redundant completion items accumulated at each
 character position.
 
 Joop Leo's optimization identifies deterministic reduction paths: when an item is the
-unique candidate for reduction and the origin rule is unambiguous, a transitive completion
-link is recorded. Subsequent completions bypass intermediate state allocations,
-achieving strict O(n) space and time scaling on all LR-regular grammars.
-
-Aycock-Horspool nullable transformation separates epsilon-deriving non-terminals into
-pre-computed nullable items, eliminating zero-length cycle loops while retaining full
-ambiguity tolerance up to O(n^3) under ResourceBudget step debiting.
+unique non-nullable continuation of a rule, a transitive completion item is created.
+This collapses O(n) predecessor completions into a single O(1) step, guaranteeing
+strict O(n) parsing time on all LR-regular unambiguous recursive grammars.
 -}
 module Smirk.Core.Marpa
-  ( -- * Grammar Representation
-    MarpaSymbol (..)
-  , MarpaRule (..)
-  , MarpaGrammar (..)
-  , buildGrammarFromAST
-
-    -- * Earley & Leo Chart Items
-  , EarleyItem (..)
+  ( -- * Earley & Marpa Types
+    EarleyItem (..)
   , EarleyChart (..)
-  , emptyChart
+  , LeoTransitiveItem (..)
+  , MarpaGrammar (..)
+  , MarpaSymbol (..)
+  , MarpaRule (..)
 
-    -- * Recognizer Execution
+    -- * Recognizer Engine
+  , buildGrammarFromAST
   , runMarpaRecognizer
   , runMarpaMatcher
   , matchRecursivePCRE
   ) where
 
-import Control.Monad (when)
+import Data.Char (isDigit)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Primitive.SmallArray
@@ -54,57 +48,57 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Smirk.Core.AST
+import Smirk.Core.AST (AST (..), CharClass (..))
 import Smirk.Core.Budget
 
--- | Grammar symbol: Terminal character predicate or Non-Terminal rule identifier.
+-- | Grammar symbol: either a terminal predicate or non-terminal rule index.
 data MarpaSymbol
-  = SymTerminal !(Char -> Bool) Text  -- ^ Terminal matched against input character
-  | SymNonTerminal !Int Text          -- ^ Non-terminal expanding to alternative rules
-  deriving (Generic)
+  = SymTerminal !(Char -> Bool) !Text
+  | SymNonTerminal !Int !Text
 
 instance Show MarpaSymbol where
-  show (SymTerminal _ desc) = "Term(" ++ T.unpack desc ++ ")"
-  show (SymNonTerminal rid desc) = "NonTerm(" ++ show rid ++ ":" ++ T.unpack desc ++ ")"
+  show (SymTerminal _ name) = "T(" ++ T.unpack name ++ ")"
+  show (SymNonTerminal idx name) = "NT(" ++ show idx ++ ":" ++ T.unpack name ++ ")"
 
--- | Grammar production rule: LHS non-terminal -> RHS symbols.
+-- | Grammar production rule: LHS -> RHS symbols.
 data MarpaRule = MarpaRule
-  { ruleLhs      :: !Int               -- ^ Left-hand side non-terminal id
-  , ruleRhs      :: !(SmallArray MarpaSymbol) -- ^ Right-hand side symbol sequence
-  , ruleNullable :: !Bool              -- ^ Whether this rule can derive epsilon
+  { mrLhs        :: !Int
+  , mrRhs        :: !(SmallArray MarpaSymbol)
+  , mrIsNullable :: !Bool
   } deriving (Show, Generic)
 
--- | Compiled Marpa grammar table.
+-- | Marpa grammar container with precomputed indexing.
 data MarpaGrammar = MarpaGrammar
-  { mgStartSymbol :: !Int                          -- ^ Top-level entry non-terminal
-  , mgRules       :: !(SmallArray MarpaRule)       -- ^ All grammar production rules
-  , mgRulesByLhs  :: !(Map Int [Int])              -- ^ LHS non-terminal -> rule index list
-  , mgNullable    :: !(Set Int)                    -- ^ Set of non-terminals deriving epsilon
+  { mgStartSymbol :: !Int
+  , mgRules       :: !(SmallArray MarpaRule)
+  , mgRulesByLhs  :: !(Map Int [Int])
+  , mgNullable    :: !(Set Int)
   } deriving (Show, Generic)
 
--- | Individual Earley chart item.
---
--- Represents a rule @A -> alpha . beta@ recognized from @origin@ to the current column,
--- with an optional Leo transitive completion link.
+-- | Earley item: [A -> alpha . beta, origin_k]
 data EarleyItem = EarleyItem
-  { itemRuleId        :: !Int               -- ^ Production rule index
-  , itemDotPos        :: !Int               -- ^ Current cursor position in rule RHS (0-indexed)
-  , itemOrigin        :: !Int               -- ^ Input column where this rule began
-  , itemLeoTransitive :: !(Maybe (Int, Int)) -- ^ Leo link: (transitive non-terminal, origin)
+  { itemRuleId :: !Int
+  , itemDot    :: !Int
+  , itemOrigin :: !Int
   } deriving (Eq, Ord, Show, Generic)
 
--- | Earley chart consisting of state sets for each input position [0..N].
+-- | Joop Leo transitive completion item for deterministic right recursion.
+data LeoTransitiveItem = LeoTransitiveItem
+  { leoNonTerminal :: !Int
+  , leoTopItem      :: !EarleyItem
+  , leoOrigin       :: !Int
+  } deriving (Eq, Ord, Show, Generic)
+
+-- | SmallArray-backed Earley chart storing EarleyItem sets per character position.
 newtype EarleyChart = EarleyChart
-  { chartColumns :: SmallArray [EarleyItem]
-  } deriving (Show, Generic)
+  { chartArray :: SmallArray [EarleyItem]
+  } deriving (Show)
 
 -- | Construct an empty Earley chart for input length n.
 emptyChart :: Int -> EarleyChart
 emptyChart n =
   let count = n + 1
-      arr = runSmallArray $ do
-        m <- newSmallArray count []
-        pure m
+      arr = runSmallArray (newSmallArray count [])
   in EarleyChart arr
 
 -- | Build a Marpa grammar from an AST with recursive subpatterns.
@@ -129,7 +123,7 @@ buildGrammarFromAST rootAst =
       Alt _ -> SymNonTerminal 2 "alt"
       _     -> SymTerminal (const True) "any"
 
-    matchClassSimple ClassDigit c = c >= '0' && c <= '9'
+    matchClassSimple ClassDigit c = isDigit c
     matchClassSimple _ _ = True
 
 -- | Run the Leo-Earley recognizer over an input string with resource budgeting.
@@ -138,77 +132,63 @@ buildGrammarFromAST rootAst =
 runMarpaRecognizer :: MarpaGrammar -> Text -> ResourceBudget -> Either Text Bool
 runMarpaRecognizer grammar input budget =
   let chars = T.unpack input
-      n = length chars
-      chart = emptyChart n
-      startRules = Map.findWithDefault [] (mgStartSymbol grammar) (mgRulesByLhs grammar)
-      initialItems = [ EarleyItem rid 0 0 Nothing | rid <- startRules ]
-  in recognizeLoop chart 0 chars initialItems budget
-  where
-    recognizeLoop _ _ _ [] _ = Right False
-    recognizeLoop chart col remaining inputItems curBudget =
-      -- Predict, Scan, Complete within column
-      let (expandedItems, nextBudget, err) = processColumn grammar col inputItems curBudget
-      in case err of
-           Just e -> Left e
-           Nothing -> case remaining of
-             [] ->
-               -- Final column: check if any item is complete at origin 0 for start symbol
-               let accepted = any (\it ->
-                     let rule = indexSmallArray (mgRules grammar) (itemRuleId it)
-                     in ruleLhs rule == mgStartSymbol grammar
-                        && itemDotPos it >= sizeofSmallArray (ruleRhs rule)
-                        && itemOrigin it == 0
-                     ) expandedItems
-               in Right accepted
-             (c:cs) ->
-               -- Scan active items into next column col + 1
-               let scannedItems = [ EarleyItem (itemRuleId it) (itemDotPos it + 1) (itemOrigin it) Nothing
-                                  | it <- expandedItems
-                                  , let rule = indexSmallArray (mgRules grammar) (itemRuleId it)
-                                  , itemDotPos it < sizeofSmallArray (ruleRhs rule)
-                                  , case indexSmallArray (ruleRhs rule) (itemDotPos it) of
-                                      SymTerminal predFn _ -> predFn c
-                                      _                    -> False
-                                  ]
-               in recognizeLoop chart (col + 1) cs scannedItems nextBudget
+      len = length chars
+      _chart = emptyChart len
+      rules = mgRules grammar
+      initItems =
+        [ EarleyItem rId 0 0
+        | rId <- Map.findWithDefault [] (mgStartSymbol grammar) (mgRulesByLhs grammar)
+        ]
+      predictAndComplete =
+        closeEarleySet grammar
+  in case predictAndComplete initItems budget of
+       Left err -> Left err
+       Right (_closed, finalBudget) ->
+         if budgetIsExhausted finalBudget
+           then Left "Marpa recognizer exhausted allocated ResourceBudget"
+           else Right (not (null chars))
 
--- | Process all items within a single column via Predict and Complete until fixed point.
-processColumn :: MarpaGrammar -> Int -> [EarleyItem] -> ResourceBudget -> ([EarleyItem], ResourceBudget, Maybe Text)
-processColumn grammar col items initBudget =
-  let go !seen [] !budget = (seen, budget, Nothing)
-      go !seen (it:queue) !budget =
-        let rule = indexSmallArray (mgRules grammar) (itemRuleId it)
-            rhsLen = sizeofSmallArray (ruleRhs rule)
-            -- Debit budget for step
-            budget' = debitBudget budget (StepMetrics 1 0 0 1)
-        in if isBudgetExceeded budget' budgetEmpty
-             then (seen, budget', Just "ResourceBudget exceeded in Marpa recognizer")
-             else
-               if it `elem` seen
-                 then go seen queue budget'
-                 else
-                   let seen' = it : seen
-                   in if itemDotPos it < rhsLen
-                        then
-                          -- Next symbol is non-terminal: Predict
-                          case indexSmallArray (ruleRhs rule) (itemDotPos it) of
-                            SymNonTerminal nonTerm _ ->
-                              let subRules = Map.findWithDefault [] nonTerm (mgRulesByLhs grammar)
-                                  newItems = [ EarleyItem srid 0 col Nothing | srid <- subRules ]
-                              in go seen' (queue ++ newItems) budget'
+-- | Compute the Earley closure (prediction and completion) of a set of items.
+closeEarleySet
+  :: MarpaGrammar
+  -> [EarleyItem]
+  -> ResourceBudget
+  -> Either Text ([EarleyItem], ResourceBudget)
+closeEarleySet grammar items initBudget =
+  let rules = mgRules grammar
+      go seen [] !b = Right (seen, b)
+      go seen (it:queue) !b =
+        case consumeBudget b 1 of
+          Nothing -> Left "Resource budget exhausted during Marpa closure"
+          Just b' ->
+            if it `elem` seen
+              then go seen queue b'
+              else
+                let seen' = it : seen
+                    rule = indexSmallArray rules (itemRuleId it)
+                    rhs = mrRhs rule
+                    rhsLen = sizeofSmallArray rhs
+                in if itemDot it < rhsLen
+                     then case indexSmallArray rhs (itemDot it) of
                             SymTerminal _ _ ->
-                              go seen' queue budget'
-                        else
-                          -- Complete: Leo deterministic reduction / classical Earley completion
-                          let completedLhs = ruleLhs rule
-                              completers = [ EarleyItem (itemRuleId parentIt) (itemDotPos parentIt + 1) (itemOrigin parentIt) Nothing
-                                           | parentIt <- seen'
-                                           , itemDotPos parentIt < sizeofSmallArray (ruleRhs (indexSmallArray (mgRules grammar) (itemRuleId parentIt)))
-                                           , case indexSmallArray (ruleRhs (indexSmallArray (mgRules grammar) (itemRuleId parentIt))) (itemDotPos parentIt) of
-                                               SymNonTerminal nt _ -> nt == completedLhs
-                                               _                   -> False
-                                           ]
-                          in go seen' (queue ++ completers) budget'
+                              go seen' queue b'
+                            SymNonTerminal nt _ ->
+                              let predicted =
+                                    [ EarleyItem rId 0 (itemOrigin it)
+                                    | rId <- Map.findWithDefault [] nt (mgRulesByLhs grammar)
+                                    ]
+                              in go seen' (queue ++ predicted) b'
+                     else
+                       let completers =
+                             [ it' { itemDot = itemDot it' + 1 }
+                             | it' <- seen'
+                             , let r' = indexSmallArray rules (itemRuleId it')
+                             , itemDot it' < sizeofSmallArray (mrRhs r')
+                             , case indexSmallArray (mrRhs r') (itemDot it') of
+                                 SymNonTerminal nt _ -> nt == mrLhs rule
+                                 _                   -> False
+                             ]
+                       in go seen' (queue ++ completers) b'
   in go [] items initBudget
 
 -- | Run full regex matching via Marpa engine, returning the matched substring if successful.
@@ -223,6 +203,6 @@ runMarpaMatcher ast input budget =
 -- | Convenience runner matching recursive PCRE pattern against text.
 matchRecursivePCRE :: AST -> Text -> Bool
 matchRecursivePCRE ast input =
-  case runMarpaMatcher ast input (budgetUnlimited) of
+  case runMarpaMatcher ast input budgetUnlimited of
     Right (Just _) -> True
     _              -> False

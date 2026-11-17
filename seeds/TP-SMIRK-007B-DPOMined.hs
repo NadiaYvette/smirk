@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -50,6 +49,7 @@ module Smirk.Core.DPO.Mined
   , optimizeRegexWithMinedRules
   ) where
 
+import Data.Maybe (fromMaybe)
 import GHC.Generics (Generic)
 
 import Smirk.Core.AST
@@ -172,9 +172,7 @@ mineDPORules = go
 applyMinedDPORules :: [MinedDPORule] -> Program -> Program
 applyMinedDPORules rules initialProg =
   let verifiedRules = [ minedDPO r | r <- rules, minedIsVerified r ]
-      step prog r = case applyDPOPeepholeRule r prog of
-        Just p' -> p'
-        Nothing -> prog
+      step prog r = fromMaybe prog (applyDPOPeepholeRule r prog)
       rewritten = foldl step initialProg verifiedRules
   in optimizeBytecodeDPO rewritten
 

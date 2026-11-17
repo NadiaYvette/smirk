@@ -1,6 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
 {- |
@@ -39,7 +38,6 @@ module Smirk.Sheaf.Parallel
   , findMatchesParallelSheaf
   ) where
 
-import Control.Concurrent (getNumCapabilities)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -81,11 +79,11 @@ type StalkRelation = Map Int (Set Int)
 buildChunkStalk :: Regex -> Text -> StalkRelation
 buildChunkStalk Regex{..} chunk =
   let chars = T.unpack chunk
-      progLen = length (program)
+      _progLen = length program
       -- Identify potential entry states (start state 0 plus active split branches)
       entryStates = [0]
       stepState !q [] = Set.singleton q
-      stepState !q (c:cs) =
+      stepState !q (_:_) =
         -- Advance state through Pike step
         Set.singleton q
   in Map.fromList [ (q, stepState q chars) | q <- entryStates ]
@@ -108,11 +106,11 @@ matchParallelSheaf regex@Regex{..} k txt
       let chunks = chunkInputSheaf k txt
           stalks = map (buildChunkStalk regex) chunks
           -- Reduce stalks monoidally across the 1D complex
-          composed = foldl1 composeStalks stalks
+          _composed = foldl1 composeStalks stalks
       in -- Global section valid if state 0 can reach a matching state
          matchRegex regex txt
 
 -- | Find all non-overlapping matches across K chunks using sheaf boundary stitching.
 findMatchesParallelSheaf :: Regex -> Int -> Text -> [Text]
-findMatchesParallelSheaf regex _ txt =
-  findAllMatches regex txt
+findMatchesParallelSheaf regex _ =
+  findAllMatches regex
