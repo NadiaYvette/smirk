@@ -1,5 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RecordWildCards #-}
 
 {- |
 Module      : Smirk.Core.Strata
@@ -199,44 +201,44 @@ buildFollowTable n edges =
 
 -- | Transition active state bitmask across a single input character.
 --
--- For each active position i, if position i matches c, its follow positions become active.
+-- For each active position i, its follow positions that match c become active.
 {-# INLINE stepGlushkov #-}
 stepGlushkov :: GlushkovNFA -> Word64 -> Char -> Word64
 stepGlushkov GlushkovNFA{..} currentMask c =
-  let loop !acc !p
+  let followMask = foldFollow 0 0
+      foldFollow !acc !p
         | p >= gPosCount = acc
-        | testBit currentMask p =
-            let matches = (gMatchPos V.! p) c
-                acc' = if matches then acc .|. (gFollow V.! p) else acc
-            in loop acc' (p + 1)
-        | otherwise = loop acc (p + 1)
-  in loop 0 0
+        | testBit currentMask p = foldFollow (acc .|. (gFollow V.! p)) (p + 1)
+        | otherwise = foldFollow acc (p + 1)
+      filterMatch !acc !p
+        | p >= gPosCount = acc
+        | testBit followMask p && (gMatchPos V.! p) c = filterMatch (setBit acc p) (p + 1)
+        | otherwise = filterMatch acc (p + 1)
+  in filterMatch 0 0
+
+-- | Compute initial active positions that match the first character.
+initMask :: GlushkovNFA -> Char -> Word64
+initMask GlushkovNFA{..} c =
+  let filterInit !acc !p
+        | p >= gPosCount = acc
+        | testBit gInitialStates p && (gMatchPos V.! p) c = filterInit (setBit acc p) (p + 1)
+        | otherwise = filterInit acc (p + 1)
+  in filterInit 0 0
 
 -- | Execute Glushkov bit-parallel matching over a String input.
 --
 -- Returns True if the entire input matches the pattern.
 matchGlushkov :: GlushkovNFA -> String -> Bool
-matchGlushkov nfa@GlushkovNFA{..} input = case input of
+matchGlushkov nfa@GlushkovNFA{..} = \case
   [] -> gNullable
   (c:cs) ->
-    let initActive = gInitialStates
-        loop !mask [] = (mask .&. gFinalStates) /= 0
-        loop !mask (ch:chs) =
-          let nextMask = stepGlushkov nfa mask ch
-          in nextMask /= 0 && loop nextMask chs
-        firstMask =
-          let seedLoop !acc !p
-                | p >= gPosCount = acc
-                | testBit initActive p =
-                    let matches = (gMatchPos V.! p) c
-                        acc' = if matches then acc .|. (gFollow V.! p) else acc
-                    in seedLoop acc' (p + 1)
-                | otherwise = seedLoop acc (p + 1)
-              directFirst = (initActive .&. gFinalStates) /= 0 && null cs
-          in (seedLoop 0 0, directFirst)
-    in case cs of
-         [] -> (initActive .&. gFinalStates) /= 0 && any (\p -> testBit initActive p && (gMatchPos V.! p) c) [0..gPosCount - 1]
-         _  -> loop (fst firstMask) cs
+    let active0 = initMask nfa c
+        go !mask = \case
+          [] -> (mask .&. gFinalStates) /= 0
+          (ch:chs)
+            | mask == 0 -> False
+            | otherwise -> go (stepGlushkov nfa mask ch) chs
+    in go active0 cs
 
 -- | Execute Glushkov bit-parallel matching over a Data.Text input.
 matchGlushkovText :: GlushkovNFA -> Text -> Bool
