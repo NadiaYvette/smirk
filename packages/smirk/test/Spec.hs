@@ -3,6 +3,7 @@ module Main (main) where
 import Test.Hspec
 import qualified BudgetSpec
 import qualified StrataSpec
+import qualified MarpaSpec
 import qualified CursorSpec
 import qualified ParserSpec
 import qualified VMSpec
@@ -16,6 +17,7 @@ import qualified DiskIndexSpec
 main :: IO ()
 main = hspec $ do
   StrataSpec.spec
+  MarpaSpec.spec
   BudgetSpec.spec
   CursorSpec.spec
   ParserSpec.spec
