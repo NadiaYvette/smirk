@@ -34,5 +34,5 @@ spec = describe "Smirk.Core.Marpa" $ do
           grammar = buildGrammarFromAST ast
           exhaustedBudget = budgetEmpty
       case runMarpaRecognizer grammar "z" exhaustedBudget of
-        Left err -> T.isInfixOf "budget" err `shouldBe` True
+        Left err -> T.isInfixOf "budget" (T.toLower err) `shouldBe` True
         Right _  -> expectationFailure "Expected ResourceBudget error but succeeded"
