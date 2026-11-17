@@ -52,6 +52,9 @@ module Smirk
   , wildcardGlobOptions
   , matchGlob
 
+    -- * Continuation Batching
+  , module Smirk.Continuation.Batch
+
     -- * QuasiQuoters & Editors
   , re
   , reNE
@@ -187,6 +190,7 @@ import Smirk.Core.Budget
 import Smirk.Engine.Sequence
 import Smirk.Engine.VM
 import Smirk.Glob
+import Smirk.Continuation.Batch
 
 -- | Compile a PCRE regular expression string into a runnable 't:Regex'.
 -- Returns a parse error description as 'Left' on failure.

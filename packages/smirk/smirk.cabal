@@ -71,6 +71,7 @@ library
         Smirk.Engine.Sequence
         Smirk.Engine.VM
         Smirk.Glob
+        Smirk.Continuation.Batch
     build-depends:
         base >= 4.16 && < 5,
         containers >= 0.6 && < 1,
@@ -97,6 +98,7 @@ test-suite smirk-test
         SequenceSpec
         QuoteSpec
         GlobSpec
+        BatchSpec
     build-depends:
         base >= 4.16 && < 5,
         bytestring >= 0.11 && < 1,

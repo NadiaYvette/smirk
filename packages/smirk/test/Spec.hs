@@ -8,6 +8,7 @@ import qualified VMSpec
 import qualified SequenceSpec
 import qualified QuoteSpec
 import qualified GlobSpec
+import qualified BatchSpec
 
 main :: IO ()
 main = hspec $ do
@@ -18,3 +19,4 @@ main = hspec $ do
   SequenceSpec.spec
   QuoteSpec.spec
   GlobSpec.spec
+  BatchSpec.spec
