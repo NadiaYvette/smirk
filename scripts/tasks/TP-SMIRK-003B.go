@@ -56,8 +56,8 @@ func main() {
 	}
 	cabalStr := string(cabalBytes)
 
-	if !strings.Contains(cabalStr, "bytestring") {
-		cabalStr = strings.Replace(cabalStr, "        text >= 2.0 && < 3\n", "        text >= 2.0 && < 3,\n        bytestring >= 0.10 && < 0.13\n", 2)
+	if !strings.Contains(cabalStr, "primitive") {
+		cabalStr = strings.Replace(cabalStr, "        text >= 2.0 && < 3\n", "        primitive >= 0.7 && < 1.0,\n        bytestring >= 0.10 && < 0.13,\n        text >= 2.0 && < 3\n", 2)
 	}
 	if err := os.WriteFile(cabalPath, []byte(cabalStr), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", cabalPath, err)
