@@ -65,6 +65,7 @@ library
         effectful-core >= 2.0 && < 3,
         effectful-th >= 1.0 && < 2,
         smirk >= 0.1 && < 0.2,
+        stm >= 2.5 && < 3,
         text >= 2.0 && < 3
 
 test-suite smirk-effectful-test
@@ -78,4 +79,7 @@ test-suite smirk-effectful-test
         hspec >= 2.10 && < 3,
         smirk >= 0.1 && < 0.2,
         smirk-effectful,
+        async >= 2.2 && < 3,
+        bytestring >= 0.10 && < 0.13,
+        stm >= 2.5 && < 3,
         text >= 2.0 && < 3
