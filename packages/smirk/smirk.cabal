@@ -60,6 +60,7 @@ library
     exposed-modules:
         Smirk
         Smirk.Core.AST
+        Smirk.Core.Strata
         Smirk.Core.Budget
         Smirk.Core.Parser
         Smirk.Core.Bytecode
@@ -93,6 +94,7 @@ test-suite smirk-test
     hs-source-dirs:     test
     main-is:            Spec.hs
     other-modules:
+        StrataSpec
         BudgetSpec
         CursorSpec
         ParserSpec

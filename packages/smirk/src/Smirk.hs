@@ -192,6 +192,7 @@ import Smirk.Core.Budget
 import Smirk.Engine.Sequence
 import Smirk.Engine.VM
 import Smirk.Glob
+import Smirk.Core.Strata
 import Smirk.Continuation.Batch
 import Smirk.Continuation.NetworkFilter
 import Smirk.Continuation.DiskIndex
