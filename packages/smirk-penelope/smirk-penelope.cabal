@@ -69,6 +69,8 @@ library
         polytropos-core >= 0.1 && < 0.2,
         polytropos-plugin >= 0.1 && < 0.2,
         smirk >= 0.1 && < 0.2,
+        primitive >= 0.7 && < 1.0,
+        bytestring >= 0.10 && < 0.13,
         text >= 2.0 && < 3
 
 test-suite smirk-penelope-test
@@ -87,4 +89,6 @@ test-suite smirk-penelope-test
         polytropos-plugin >= 0.1 && < 0.2,
         smirk >= 0.1 && < 0.2,
         smirk-penelope,
+        primitive >= 0.7 && < 1.0,
+        bytestring >= 0.10 && < 0.13,
         text >= 2.0 && < 3
