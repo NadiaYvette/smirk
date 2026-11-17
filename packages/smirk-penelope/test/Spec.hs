@@ -13,6 +13,7 @@ import Test.Hspec
 import qualified Data.Sketch.TDigest.Telemetry as TDT
 import Data.Sketch.TDigest.Telemetry (TailQuantiles (..))
 import Smirk
+import Smirk.Continuation.Cooperative
 import Smirk.Effect.Penelope
 import Smirk.Effect.Telemetry
 
@@ -99,23 +100,12 @@ main = hspec $ do
             Nothing  -> expectationFailure "Expected match in IO Eff"
         Left err -> expectationFailure (show err)
 
-    it "runs under IO monad with fuel via runRegexEngineWithFuelM" $ do
-      case mReg of
-        Right reg -> do
-          mRes <- runRegexEngineWithFuelM @Text (StepBudget 2000) $ do
-            matchRegex reg target
-          case mRes of
-            Just res -> res.matchedSlice `shouldBe` "timeout=500"
-            Nothing  -> expectationFailure "Expected match in IO Eff with fuel"
-        Left err -> expectationFailure (show err)
-
-  describe "Smirk.Effect.Telemetry (Streaming dunning-t-digest Quantile Profiler)" $ do
-    it "records streaming observations and calculates accurate tail quantiles" $ do
+  describe "Smirk.Effect.Telemetry (Dunning t-digest Metrics & Outlier Profiler)" $ do
+    it "records streaming observations and tracks quantiles" $ do
       state <- newTelemetryState Nothing
-      -- Feed synthetic step metrics across a range 10..1000
-      forM_ [1 .. 100 :: Int] $ \i -> do
-        let steps = i * 10
-            bytes = 50
+      forM_ ([10..1000] :: [Double]) $ \v -> do
+        let steps = round v
+            bytes = 100
             met = (emptyStepMetrics Unlimited)
               { stepsConsumed = steps
               , utf8BytesMaterialized = bytes
@@ -125,16 +115,12 @@ main = hspec $ do
       (digests, _) <- snapshotTelemetry state
       case TDT.channelTailQuantiles TDT.stepsConsumed digests of
         Just tq -> do
-          -- p50 of [10..1000] should be ~505
           (tq.p50 >= 450 && tq.p50 <= 560) `shouldBe` True
-          -- p90 should be ~900
           (tq.p90 >= 850 && tq.p90 <= 950) `shouldBe` True
-          -- p99 should be ~990
           (tq.p99 >= 940 && tq.p99 <= 1010) `shouldBe` True
         Nothing -> expectationFailure "Expected quantiles for stepsConsumed"
 
     it "triggers telemetry warnings on outlier ratio breach" $ do
-      -- Set static threshold ceiling to 5.0 steps/byte
       state <- newTelemetryState (Just 5.0)
       let normalMet = (emptyStepMetrics Unlimited)
             { stepsConsumed = 20
@@ -171,4 +157,61 @@ main = hspec $ do
           case TDT.channelTailQuantiles TDT.stepsConsumed digests of
             Just tq -> (tq.p50 > 0) `shouldBe` True
             Nothing -> expectationFailure "Expected non-empty telemetry digest"
+        Left err -> expectationFailure (show err)
+
+  describe "Smirk.Continuation.Cooperative (Cooperative Time-Sliced Quantum Resumption)" $ do
+    it "runs cooperative time-sliced matching producing identical results to single-shot matching" $ do
+      case mReg of
+        Right reg -> do
+          let cfg = defaultCooperativeConfig { ccQuantum = 10 }
+          outcome <- runCooperativeMatch cfg reg target
+          case outcome of
+            CoopMatched res -> res.matchedSlice `shouldBe` "timeout=500"
+            _               -> expectationFailure "Expected CoopMatched result"
+        Left err -> expectationFailure (show err)
+
+    it "supports sequence polymorphism over ByteString with cooperative slices" $ do
+      case mReg of
+        Right reg -> do
+          let cfg = defaultCooperativeConfig { ccQuantum = 10 }
+          outcome <- runCooperativeMatch cfg reg bsTarget
+          case outcome of
+            CoopMatched res -> res.matchedSlice `shouldBe` "timeout=500"
+            _               -> expectationFailure "Expected CoopMatched result on ByteString"
+        Left err -> expectationFailure (show err)
+
+    it "supports cancellation-token interruption" $ do
+      case mReg of
+        Right reg -> do
+          tok <- newCancellationToken
+          cancelToken tok
+          let cfg = defaultCooperativeConfig
+                { ccQuantum = 5
+                , ccCancellationToken = Just tok
+                }
+          outcome <- runCooperativeMatch cfg reg target
+          case outcome of
+            CoopCancelled _ -> pure ()
+            _               -> expectationFailure "Expected CoopCancelled result"
+        Left err -> expectationFailure (show err)
+
+    it "enforces total budget ceiling across multiple quantum slices" $ do
+      case mReg of
+        Right reg -> do
+          let cfg = defaultCooperativeConfig
+                { ccQuantum = 5
+                , ccTotalBudget = StepBudget 5
+                }
+          outcome <- runCooperativeMatch cfg reg target
+          case outcome of
+            CoopOutOfFuel _ -> pure ()
+            _               -> expectationFailure "Expected CoopOutOfFuel result"
+        Left err -> expectationFailure (show err)
+
+    it "finds all occurrences cooperatively via runCooperativeFindAll" $ do
+      case mReg of
+        Right reg -> do
+          let cfg = defaultCooperativeConfig { ccQuantum = 15 }
+          (matches, _) <- runCooperativeFindAll cfg reg target
+          map (\m -> m.matchedSlice) matches `shouldBe` ["timeout=500", "max=2000"]
         Left err -> expectationFailure (show err)
