@@ -93,6 +93,10 @@ data GlushkovNFA = GlushkovNFA
   -- ^ True if epsilon is accepted
   } deriving (Generic)
 
+instance Show GlushkovNFA where
+  show GlushkovNFA{..} =
+    "GlushkovNFA{gPosCount = " ++ show gPosCount ++ ", gNullable = " ++ show gNullable ++ "}"
+
 -- | Compile a StratumRegular AST into a GlushkovNFA.
 --
 -- Returns Nothing if the pattern exceeds 64 positions or requires CFG/backreferences.

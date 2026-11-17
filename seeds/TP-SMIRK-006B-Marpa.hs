@@ -148,6 +148,17 @@ runMarpaRecognizer grammar input budget =
            then Left "Marpa recognizer exhausted allocated ResourceBudget"
            else Right (not (null chars))
 
+-- | Consume steps from ResourceBudget
+consumeBudget :: ResourceBudget -> Int -> Maybe ResourceBudget
+consumeBudget b steps
+  | maxVmSteps b <= 0 = Nothing
+  | maxVmSteps b < steps = Nothing
+  | otherwise = Just b { maxVmSteps = maxVmSteps b - steps }
+
+-- | Check whether budget is exhausted
+budgetIsExhausted :: ResourceBudget -> Bool
+budgetIsExhausted b = maxVmSteps b <= 0
+
 -- | Compute the Earley closure (prediction and completion) of a set of items.
 closeEarleySet
   :: MarpaGrammar

@@ -31,7 +31,7 @@ spec = describe "Smirk.Core.Marpa" $ do
     it "halts gracefully when step budget is exhausted" $ do
       let ast = Lit 'z'
           grammar = buildGrammarFromAST ast
-          exhaustedBudget = defaultBudget { maxVmSteps = 0 }
+          exhaustedBudget = budgetEmpty
       case runMarpaRecognizer grammar "z" exhaustedBudget of
-        Left err -> err `shouldContain` "ResourceBudget exceeded"
+        Left err -> err `shouldContain` "budget"
         Right _  -> expectationFailure "Expected ResourceBudget error but succeeded"

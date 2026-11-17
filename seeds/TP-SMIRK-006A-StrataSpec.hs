@@ -65,4 +65,6 @@ spec = describe "Smirk.Core.Strata" $ do
 
     it "refuses to compile StratumBackref patterns into Glushkov NFA" $ do
       let ast = Seq [Group Nothing (Just 1) (Lit 'a'), BackRef 1]
-      compileGlushkov ast `shouldBe` Nothing
+      case compileGlushkov ast of
+        Nothing -> True `shouldBe` True
+        Just _  -> expectationFailure "Expected Nothing for backreference pattern"
