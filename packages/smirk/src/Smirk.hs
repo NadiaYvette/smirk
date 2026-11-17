@@ -183,6 +183,7 @@ import Smirk.Core.Evacuable
 import Smirk.Core.Parser
 import Smirk.Core.Quote
 import Smirk.Core.Types
+import Smirk.Core.Budget
 import Smirk.Engine.Sequence
 import Smirk.Engine.VM
 import Smirk.Glob
