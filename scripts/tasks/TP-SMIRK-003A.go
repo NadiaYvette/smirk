@@ -60,10 +60,10 @@ func main() {
 	cabalStr := string(cabalBytes)
 
 	if !strings.Contains(cabalStr, "Smirk.Core.Budget") {
-		cabalStr = strings.Replace(cabalStr, "        Smirk.Core.AST\n", "        Smirk.Core.AST\n      , Smirk.Core.Budget\n", 1)
+		cabalStr = strings.Replace(cabalStr, "        Smirk.Core.AST\n", "        Smirk.Core.AST\n        Smirk.Core.Budget\n", 1)
 	}
 	if !strings.Contains(cabalStr, "BudgetSpec") {
-		cabalStr = strings.Replace(cabalStr, "        CursorSpec\n", "        BudgetSpec\n      , CursorSpec\n", 1)
+		cabalStr = strings.Replace(cabalStr, "        CursorSpec\n", "        BudgetSpec\n        CursorSpec\n", 1)
 	}
 	if err := os.WriteFile(cabalPath, []byte(cabalStr), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", cabalPath, err)
