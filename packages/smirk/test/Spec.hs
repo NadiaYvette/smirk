@@ -10,6 +10,7 @@ import qualified QuoteSpec
 import qualified GlobSpec
 import qualified BatchSpec
 import qualified NetworkFilterSpec
+import qualified DiskIndexSpec
 
 main :: IO ()
 main = hspec $ do
@@ -22,3 +23,4 @@ main = hspec $ do
   GlobSpec.spec
   BatchSpec.spec
   NetworkFilterSpec.spec
+  DiskIndexSpec.spec

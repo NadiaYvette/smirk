@@ -55,6 +55,7 @@ module Smirk
     -- * Continuation Batching
   , module Smirk.Continuation.Batch
   , module Smirk.Continuation.NetworkFilter
+  , module Smirk.Continuation.DiskIndex
 
     -- * QuasiQuoters & Editors
   , re
@@ -193,6 +194,7 @@ import Smirk.Engine.VM
 import Smirk.Glob
 import Smirk.Continuation.Batch
 import Smirk.Continuation.NetworkFilter
+import Smirk.Continuation.DiskIndex
 
 -- | Compile a PCRE regular expression string into a runnable 't:Regex'.
 -- Returns a parse error description as 'Left' on failure.
