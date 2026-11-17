@@ -111,7 +111,12 @@ func main() {
 			"  , module Smirk.Continuation.NetworkFilter\n  , module Smirk.Continuation.DiskIndex",
 			1,
 		)
-		smirkHsStr = smirkHsStr + "\nimport Smirk.Continuation.DiskIndex\n"
+		smirkHsStr = strings.Replace(
+			smirkHsStr,
+			"import Smirk.Continuation.NetworkFilter\n",
+			"import Smirk.Continuation.NetworkFilter\nimport Smirk.Continuation.DiskIndex\n",
+			1,
+		)
 		if err := os.WriteFile(smirkHsPath, []byte(smirkHsStr), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", smirkHsPath, err)
 			os.Exit(1)

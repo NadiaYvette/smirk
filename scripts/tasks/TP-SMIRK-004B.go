@@ -111,7 +111,12 @@ func main() {
 			"    -- * Continuation Batching\n  , module Smirk.Continuation.Batch\n\n    -- * QuasiQuoters & Editors",
 			1,
 		)
-		smirkHsStr = smirkHsStr + "\nimport Smirk.Continuation.Batch\n"
+		smirkHsStr = strings.Replace(
+			smirkHsStr,
+			"import Smirk.Glob\n",
+			"import Smirk.Glob\nimport Smirk.Continuation.Batch\n",
+			1,
+		)
 		if err := os.WriteFile(smirkHsPath, []byte(smirkHsStr), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", smirkHsPath, err)
 			os.Exit(1)

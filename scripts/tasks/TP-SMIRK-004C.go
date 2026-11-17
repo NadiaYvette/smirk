@@ -111,7 +111,12 @@ func main() {
 			"  , module Smirk.Continuation.Batch\n  , module Smirk.Continuation.NetworkFilter",
 			1,
 		)
-		smirkHsStr = smirkHsStr + "\nimport Smirk.Continuation.NetworkFilter\n"
+		smirkHsStr = strings.Replace(
+			smirkHsStr,
+			"import Smirk.Continuation.Batch\n",
+			"import Smirk.Continuation.Batch\nimport Smirk.Continuation.NetworkFilter\n",
+			1,
+		)
 		if err := os.WriteFile(smirkHsPath, []byte(smirkHsStr), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", smirkHsPath, err)
 			os.Exit(1)
