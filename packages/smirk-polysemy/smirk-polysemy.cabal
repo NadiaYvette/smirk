@@ -63,6 +63,7 @@ library
         base >= 4.16 && < 5,
         polysemy >= 1.9 && < 2,
         smirk >= 0.1 && < 0.2,
+        stm >= 2.5 && < 3,
         text >= 2.0 && < 3
 
 test-suite smirk-polysemy-test
@@ -75,5 +76,7 @@ test-suite smirk-polysemy-test
         hspec >= 2.10 && < 3,
         polysemy >= 1.9 && < 2,
         smirk >= 0.1 && < 0.2,
+        bytestring >= 0.10 && < 0.13,
         smirk-polysemy,
+        stm >= 2.5 && < 3,
         text >= 2.0 && < 3
