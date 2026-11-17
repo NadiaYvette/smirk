@@ -18,7 +18,7 @@ func copyFile(src, dst string) error {
 	return os.WriteFile(dst, data, 0644)
 }
 
-func findSeedsDir(cwd string) string {
+func findSeedsDir(cwd, seedName string) string {
 	candidates := []string{
 		filepath.Join(cwd, "seeds"),
 	}
@@ -35,7 +35,7 @@ func findSeedsDir(cwd string) string {
 		candidates = append(candidates, filepath.Join(home, "src", "plans", "seeds"))
 	}
 	for _, c := range candidates {
-		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+		if fi, err := os.Stat(filepath.Join(c, seedName)); err == nil && !fi.IsDir() {
 			return c
 		}
 	}
@@ -49,7 +49,7 @@ func main() {
 		panic(err)
 	}
 
-	seedsDir := findSeedsDir(cwd)
+	seedsDir := findSeedsDir(cwd, "TP-SMIRK-004C-NetworkFilter.hs")
 
 	nfSeed := filepath.Join(seedsDir, "TP-SMIRK-004C-NetworkFilter.hs")
 	specSeed := filepath.Join(seedsDir, "TP-SMIRK-004C-NetworkFilterSpec.hs")
