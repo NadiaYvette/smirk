@@ -18,6 +18,30 @@ func copyFile(src, dst string) error {
 	return os.WriteFile(dst, data, 0644)
 }
 
+func findSeedsDir(cwd string) string {
+	candidates := []string{
+		filepath.Join(cwd, "seeds"),
+	}
+	if pRoot := os.Getenv("PLANS_ROOT"); pRoot != "" {
+		candidates = append(candidates, filepath.Join(pRoot, "seeds"))
+	}
+	if pDir := os.Getenv("PLANS_DIR"); pDir != "" {
+		candidates = append(candidates, filepath.Join(pDir, "seeds"))
+	}
+	candidates = append(candidates,
+		filepath.Join(filepath.Dir(cwd), "plans", "seeds"),
+	)
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, "src", "plans", "seeds"))
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+			return c
+		}
+	}
+	return filepath.Join(cwd, "seeds")
+}
+
 func main() {
 	fmt.Println("=== [TP-SMIRK-004C Task Runner] ===")
 	cwd, err := os.Getwd()
@@ -25,10 +49,7 @@ func main() {
 		panic(err)
 	}
 
-	seedsDir := filepath.Join(cwd, "seeds")
-	if _, err := os.Stat(seedsDir); os.IsNotExist(err) {
-		seedsDir = "/home/nyc/src/plans/seeds"
-	}
+	seedsDir := findSeedsDir(cwd)
 
 	nfSeed := filepath.Join(seedsDir, "TP-SMIRK-004C-NetworkFilter.hs")
 	specSeed := filepath.Join(seedsDir, "TP-SMIRK-004C-NetworkFilterSpec.hs")
