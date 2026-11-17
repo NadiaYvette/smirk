@@ -62,6 +62,7 @@ library
         Smirk.Core.AST
         Smirk.Core.Strata
         Smirk.Core.Marpa
+        Smirk.Core.DPO
         Smirk.Core.Budget
         Smirk.Core.Parser
         Smirk.Core.Bytecode
@@ -95,6 +96,7 @@ test-suite smirk-test
     hs-source-dirs:     test
     main-is:            Spec.hs
     other-modules:
+        DPOSpec
         MarpaSpec
         StrataSpec
         BudgetSpec

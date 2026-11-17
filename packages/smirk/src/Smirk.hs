@@ -194,6 +194,7 @@ import Smirk.Engine.VM
 import Smirk.Glob
 import Smirk.Core.Strata
 import Smirk.Core.Marpa
+import Smirk.Core.DPO
 import Smirk.Continuation.Batch
 import Smirk.Continuation.NetworkFilter
 import Smirk.Continuation.DiskIndex

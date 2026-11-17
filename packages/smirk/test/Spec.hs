@@ -4,6 +4,7 @@ import Test.Hspec
 import qualified BudgetSpec
 import qualified StrataSpec
 import qualified MarpaSpec
+import qualified DPOSpec
 import qualified CursorSpec
 import qualified ParserSpec
 import qualified VMSpec
@@ -18,6 +19,7 @@ main :: IO ()
 main = hspec $ do
   StrataSpec.spec
   MarpaSpec.spec
+  DPOSpec.spec
   BudgetSpec.spec
   CursorSpec.spec
   ParserSpec.spec
