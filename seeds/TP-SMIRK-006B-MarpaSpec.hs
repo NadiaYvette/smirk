@@ -9,6 +9,7 @@ License     : Apache-2.0
 module MarpaSpec (spec) where
 
 import Test.Hspec
+import qualified Data.Text as T
 import Smirk.Core.AST
 import Smirk.Core.Budget
 import Smirk.Core.Marpa
@@ -33,5 +34,5 @@ spec = describe "Smirk.Core.Marpa" $ do
           grammar = buildGrammarFromAST ast
           exhaustedBudget = budgetEmpty
       case runMarpaRecognizer grammar "z" exhaustedBudget of
-        Left err -> err `shouldContain` "budget"
+        Left err -> T.isInfixOf "budget" err `shouldBe` True
         Right _  -> expectationFailure "Expected ResourceBudget error but succeeded"

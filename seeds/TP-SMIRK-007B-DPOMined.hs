@@ -89,8 +89,8 @@ data MinedDPORule = MinedDPORule
 -- | Check whether two atomic AST nodes have disjoint character acceptances.
 areDisjointAST :: AST -> AST -> Maybe SideCondition
 areDisjointAST (Lit c1) (Lit c2)
-  | c1 /= c2  = Just (DisjointCharClasses (ClassSet [CharRangeSingle c1] False)
-                                          (ClassSet [CharRangeSingle c2] False))
+  | c1 /= c2  = Just (DisjointCharClasses (ClassSet [RangeSingle c1] False)
+                                          (ClassSet [RangeSingle c2] False))
   | otherwise = Nothing
 areDisjointAST (Class ClassDigit) (Class ClassNotDigit) =
   Just (DisjointCharClasses ClassDigit ClassNotDigit)
@@ -99,10 +99,10 @@ areDisjointAST (Class ClassWord) (Class ClassNotWord) =
 areDisjointAST (Class ClassSpace) (Class ClassNotSpace) =
   Just (DisjointCharClasses ClassSpace ClassNotSpace)
 areDisjointAST (Lit c) (Class ClassDigit)
-  | c < '0' || c > '9' = Just (DisjointCharClasses (ClassSet [CharRangeSingle c] False) ClassDigit)
+  | c < '0' || c > '9' = Just (DisjointCharClasses (ClassSet [RangeSingle c] False) ClassDigit)
   | otherwise          = Nothing
 areDisjointAST (Class ClassDigit) (Lit c)
-  | c < '0' || c > '9' = Just (DisjointCharClasses ClassDigit (ClassSet [CharRangeSingle c] False))
+  | c < '0' || c > '9' = Just (DisjointCharClasses ClassDigit (ClassSet [RangeSingle c] False))
   | otherwise          = Nothing
 areDisjointAST _ _ = Nothing
 
