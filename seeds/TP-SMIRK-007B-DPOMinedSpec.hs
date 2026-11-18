@@ -15,6 +15,7 @@ Verifies automated conditional DPO bytecode rule mining:
 module DPOMinedSpec (spec) where
 
 import Test.Hspec
+import Data.Text (Text)
 
 import Smirk (compileRegex, testMatch)
 import Smirk.Core.AST (AST (..), CharClass (..))
@@ -74,10 +75,12 @@ spec = describe "Smirk.Core.DPO.Mined" $ do
           (Right ast, Right reg) -> do
             let rules = mineDPORules ast
                 optReg = optimizeRegexWithMinedRules rules reg
+                matches :: Regex -> Text -> Bool
+                matches = testMatch
             -- Verify identical behavior on positive and negative inputs
-            testMatch optReg "a" `shouldBe` testMatch reg "a"
-            testMatch optReg "b" `shouldBe` testMatch reg "b"
-            testMatch optReg "hello there world" `shouldBe` testMatch reg "hello there world"
-            testMatch optReg "xyz" `shouldBe` testMatch reg "xyz"
+            matches optReg "a" `shouldBe` matches reg "a"
+            matches optReg "b" `shouldBe` matches reg "b"
+            matches optReg "hello there world" `shouldBe` matches reg "hello there world"
+            matches optReg "xyz" `shouldBe` matches reg "xyz"
           _ -> expectationFailure $ "Compilation failed for: " ++ show p
         ) patternStrs
