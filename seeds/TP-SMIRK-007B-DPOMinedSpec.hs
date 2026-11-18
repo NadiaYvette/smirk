@@ -17,7 +17,7 @@ module DPOMinedSpec (spec) where
 import Test.Hspec
 import Data.Text (Text)
 
-import Smirk (compileRegex, testMatch)
+import Smirk (Regex, compileRegex, testMatch)
 import Smirk.Core.AST (AST (..), CharClass (..))
 import Smirk.Core.DPO.Mined
 import Smirk.Core.Parser (parsePCRE)
