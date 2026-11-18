@@ -6,6 +6,7 @@ import qualified StrataSpec
 import qualified MarpaSpec
 import qualified DPOSpec
 import qualified SheafParallelSpec
+import qualified DPOMinedSpec
 import qualified CursorSpec
 import qualified ParserSpec
 import qualified VMSpec
@@ -22,6 +23,7 @@ main = hspec $ do
   MarpaSpec.spec
   DPOSpec.spec
   SheafParallelSpec.spec
+  DPOMinedSpec.spec
   BudgetSpec.spec
   CursorSpec.spec
   ParserSpec.spec

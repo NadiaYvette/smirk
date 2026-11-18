@@ -64,6 +64,7 @@ library
         Smirk.Core.Marpa
         Smirk.Core.DPO
         Smirk.Sheaf.Parallel
+        Smirk.Core.DPO.Mined
         Smirk.Core.Budget
         Smirk.Core.Parser
         Smirk.Core.Bytecode
@@ -97,6 +98,7 @@ test-suite smirk-test
     hs-source-dirs:     test
     main-is:            Spec.hs
     other-modules:
+        DPOMinedSpec
         SheafParallelSpec
         DPOSpec
         MarpaSpec
