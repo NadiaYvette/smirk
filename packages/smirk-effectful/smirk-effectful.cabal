@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               smirk-effectful
-version:            0.1.0.0
+version:            0.1.1.0
 synopsis:           Effectful (algebraic effects) interface for the Smirk PCRE engine
 description:
     Exposes Smirk's pure, step-bounded PCRE engine as an 'effectful' first-class
