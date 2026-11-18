@@ -13,6 +13,7 @@ import qualified VMSpec
 import qualified SequenceSpec
 import qualified QuoteSpec
 import qualified GlobSpec
+import qualified GlobZshSpec
 import qualified BatchSpec
 import qualified NetworkFilterSpec
 import qualified DiskIndexSpec
@@ -31,6 +32,7 @@ main = hspec $ do
   SequenceSpec.spec
   QuoteSpec.spec
   GlobSpec.spec
+  GlobZshSpec.spec
   BatchSpec.spec
   NetworkFilterSpec.spec
   DiskIndexSpec.spec

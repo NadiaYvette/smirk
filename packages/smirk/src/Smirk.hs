@@ -51,6 +51,7 @@ module Smirk
   , defaultGlobOptions
   , wildcardGlobOptions
   , matchGlob
+  , module Smirk.Glob.Zsh
 
     -- * Continuation Batching
   , module Smirk.Continuation.Batch
@@ -192,6 +193,7 @@ import Smirk.Core.Budget
 import Smirk.Engine.Sequence
 import Smirk.Engine.VM
 import Smirk.Glob
+import Smirk.Glob.Zsh
 import Smirk.Core.Strata
 import Smirk.Core.Marpa
 import Smirk.Core.DPO
