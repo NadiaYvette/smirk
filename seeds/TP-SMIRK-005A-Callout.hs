@@ -134,7 +134,7 @@ withSymbolTableCallout checkSymbol =
 -- | Execute regex matching with callouts inside the Penelope algebraic effect stack.
 runMatchWithCalloutPenelope ::
   RegexTarget s =>
-  (CalloutPayload s -> Eff es CalloutDecision)
+  (CalloutPayload s -> Eff eh ef CalloutDecision)
   -- ^ Penelope effectful handler callback
   -> Regex
   -- ^ Compiled Smirk regex bytecode
@@ -142,13 +142,5 @@ runMatchWithCalloutPenelope ::
   -- ^ Target sequence
   -> Fuel
   -- ^ Fuel budget
-  -> Eff es (MatchOutcome s)
-runMatchWithCalloutPenelope handler reg input fuel =
-  loop (runMatchWithMetrics reg input fuel)
-  where
-    loop outcome = case outcome.outcomeStatus of
-      SuspendedCallout payload resumeCont -> do
-        decision <- handler payload
-        let nextOutcome = resumeMatchWithMetrics (resumeCont decision) fuel
-        loop nextOutcome
-      _ -> pure outcome
+  -> Eff eh ef (MatchOutcome s)
+runMatchWithCalloutPenelope = runMatchWithCallouts
