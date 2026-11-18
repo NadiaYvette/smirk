@@ -69,6 +69,7 @@ dispatchCallout handler = handler
 -- | Resume Pike VM execution from a callout decision using the suspended continuation.
 {-# INLINE resumeFromCalloutDecision #-}
 resumeFromCalloutDecision ::
+  RegexTarget s =>
   CalloutDecision
   -- ^ Inspection verdict from the host environment
   -> (CalloutDecision -> MatchContinuation s)
