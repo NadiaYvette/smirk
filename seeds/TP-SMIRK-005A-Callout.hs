@@ -1,14 +1,9 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 
 {- |
 Module      : Smirk.Effect.Callout
@@ -69,7 +64,7 @@ dispatchCallout ::
   -> CalloutPayload s
   -- ^ Inspection snapshot from the Pike VM
   -> m CalloutDecision
-dispatchCallout handler payload = handler payload
+dispatchCallout handler = handler
 
 -- | Resume Pike VM execution from a callout decision using the suspended continuation.
 {-# INLINE resumeFromCalloutDecision #-}
@@ -81,8 +76,8 @@ resumeFromCalloutDecision ::
   -> Fuel
   -- ^ Execution fuel budget for the resumed execution
   -> MatchOutcome s
-resumeFromCalloutDecision decision resumeCont fuel =
-  resumeMatchWithMetrics (resumeCont decision) fuel
+resumeFromCalloutDecision decision resumeCont =
+  resumeMatchWithMetrics (resumeCont decision)
 
 -- | Repeatedly resolve 'SuspendedCallout' hooks in a host monad until the regex engine terminates.
 runMatchWithCallouts ::

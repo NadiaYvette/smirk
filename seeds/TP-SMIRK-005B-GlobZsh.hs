@@ -39,6 +39,7 @@ module Smirk.Glob.Zsh
 
 import Control.Applicative (empty, (<|>))
 import Data.Char (isDigit)
+import Data.Functor (($>))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
@@ -88,9 +89,9 @@ type Parser = Parsec Void Text
 -- | Megaparsec parser for a single Zsh qualifier symbol.
 pSingleQualifier :: Parser ZshQualifier
 pSingleQualifier =
-      (char '.' *> pure QualRegularFile)
-  <|> (char '/' *> pure QualDirectory)
-  <|> (char '@' *> pure QualSymlink)
+      (char '.' $> QualRegularFile)
+  <|> (char '/' $> QualDirectory)
+  <|> (char '@' $> QualSymlink)
   <|> (char '^' *> (QualNegate <$> pSingleQualifier))
   <|> pSizeBound
   <|> pMTimeBound
@@ -100,7 +101,7 @@ pSingleQualifier =
 pSizeBound :: Parser ZshQualifier
 pSizeBound = do
   _ <- char 'L'
-  ord <- (char '+' *> pure GT) <|> (char '-' *> pure LT) <|> pure EQ
+  ord <- (char '+' $> GT) <|> (char '-' $> LT) <|> pure EQ
   digits <- takeWhile1P (Just "digits") isDigit
   case reads (T.unpack digits) of
     [(val, "")] -> pure (QualSizeBound ord val)
@@ -110,7 +111,7 @@ pSizeBound = do
 pMTimeBound :: Parser ZshQualifier
 pMTimeBound = do
   _ <- char 'm'
-  ord <- (char '+' *> pure GT) <|> (char '-' *> pure LT) <|> pure EQ
+  ord <- (char '+' $> GT) <|> (char '-' $> LT) <|> pure EQ
   digits <- takeWhile1P (Just "digits") isDigit
   case reads (T.unpack digits) of
     [(val, "")] -> pure (QualMTimeBound ord val)

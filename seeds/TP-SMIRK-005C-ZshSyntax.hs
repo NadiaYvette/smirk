@@ -32,6 +32,7 @@ module Smirk.Zsh.Expansion.Syntax
 
 import Control.Applicative (empty, (<|>))
 import Data.Char (isAlphaNum, isDigit)
+import Data.Functor (($>))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
@@ -84,9 +85,9 @@ type Parser = Parsec Void Text
 -- | Parse a single Zsh modifier flag inside @(...)@.
 pZshFlag :: Parser ZshFlag
 pZshFlag =
-      (char '@' *> pure FlagAtArrayPreserve)
-  <|> (char 'M' *> pure FlagMatchedPortionOnly)
-  <|> (char 'R' *> pure FlagRestPortionOnly)
+      (char '@' $> FlagAtArrayPreserve)
+  <|> (char 'M' $> FlagMatchedPortionOnly)
+  <|> (char 'R' $> FlagRestPortionOnly)
   <|> pDelimitedFlag 's' FlagSplit
   <|> pDelimitedFlag 'j' FlagJoin
 
@@ -102,12 +103,12 @@ pDelimitedFlag indicator con = do
 -- | Parse the flags block @(...)@ if present.
 pFlagsBlock :: Parser [ZshFlag]
 pFlagsBlock =
-  (between (char '(') (char ')') (some pZshFlag)) <|> pure []
+  between (char '(') (char ')') (some pZshFlag) <|> pure []
 
 -- | Parse integer value for subscript bounds.
 pInt :: Parser Int
 pInt = do
-  sign <- (char '-' *> pure (-1)) <|> pure 1
+  sign <- (char '-' $> (-1)) <|> pure 1
   digits <- takeWhile1P (Just "digits") isDigit
   case reads (T.unpack digits) of
     [(v, "")] -> pure (sign * v)
@@ -134,7 +135,7 @@ pStripOp =
 pSubstOp :: Parser SubstOp
 pSubstOp = do
   _ <- char ':'
-  isGlob <- (string "gs" *> pure True) <|> (char 's' *> pure False)
+  isGlob <- (string "gs" $> True) <|> (char 's' $> False)
   delim <- anySingle
   pat <- takeWhileP (Just "pattern") (/= delim)
   _ <- char delim

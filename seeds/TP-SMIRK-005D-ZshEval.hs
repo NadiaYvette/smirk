@@ -12,10 +12,10 @@ Maintainer  : Nadia Chambers <nadia.yvette.chambers@ik.me>
 Stability   : experimental
 Portability : non-portable (GHC extensions)
 
-Implements the two-sorted ('ValScalar' vs. 'ValArray') inside-out evaluation
-pipeline over the 'Smirk.Zsh.Expansion.Syntax' AST, respecting exact Zsh
-semantic fidelity for nested expansion, quote tracking, array preservation
-under @(@)@, splitting, joining, and pattern stripping.
+Implements the two-sorted ('TwoSortedVal': 'ValScalar' vs. 'ValArray')
+inside-out evaluation pipeline over the 'Smirk.Zsh.Expansion.Syntax' AST,
+respecting exact Zsh semantic fidelity for nested expansion, quote tracking,
+array preservation under @(@)@, splitting, joining, and pattern stripping.
 -}
 module Smirk.Zsh.Expansion.Eval
   ( -- * Two-Sorted Value Domain
@@ -82,7 +82,7 @@ smallArrayFromList xs =
   let !len = length xs
   in runSmallArray $ do
        marr <- newSmallArray len (error "uninitialized slot")
-       forM_ (zip [0..] xs) $ \(i, x) -> writeSmallArray marr i x
+       forM_ (zip [0..] xs) $ uncurry (writeSmallArray marr)
        pure marr
 
 -- | Evaluate a 'ZshParamExpansion' inside-out against an ambient variable lookup function.
@@ -121,11 +121,9 @@ evalZshExpansion envLookup ast = do
   let valFlagged = applyExpansionFlags ast.expFlags valSubst
 
   -- 6. Apply subscript indexing [1] or [1,3]
-  valFinal <- case ast.expSubscript of
+  case ast.expSubscript of
     Just sub -> pure (applySubscript sub valFlagged)
     Nothing  -> pure valFlagged
-
-  pure valFinal
 
 -- | Apply splitting and joining flags to a 'TwoSortedVal'.
 applyExpansionFlags :: [ZshFlag] -> TwoSortedVal -> TwoSortedVal
