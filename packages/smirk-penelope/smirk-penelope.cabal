@@ -65,6 +65,7 @@ library
       , Smirk.Effect.Telemetry
       , Smirk.Continuation.Cooperative
       , Smirk.Effect.Callout
+      , Smirk.Zsh.Expansion.Eval
     build-depends:
         base >= 4.16 && < 5,
         stm >= 2.5 && < 3,
@@ -85,6 +86,7 @@ test-suite smirk-penelope-test
     main-is:            Spec.hs
     other-modules:
         CalloutSpec
+        ZshExpansionEvalSpec
     ghc-options:
         -fplugin=Polytropos.Plugin
     build-depends:

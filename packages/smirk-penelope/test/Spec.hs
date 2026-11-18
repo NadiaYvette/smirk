@@ -17,10 +17,12 @@ import Smirk.Continuation.Cooperative
 import Smirk.Effect.Penelope
 import Smirk.Effect.Telemetry
 import qualified CalloutSpec
+import qualified ZshExpansionEvalSpec
 
 main :: IO ()
 main = hspec $ do
   CalloutSpec.spec
+  ZshExpansionEvalSpec.spec
   let mReg = compileRegex "(?<key>[a-z]+)=(?<val>\\d+)"
       target = ("config: timeout=500ms max=2000ms" :: Text)
       bsTarget = ("config: timeout=500ms max=2000ms" :: BSC.ByteString)
