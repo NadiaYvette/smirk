@@ -16,17 +16,16 @@ module DPOMinedSpec (spec) where
 
 import Test.Hspec
 
+import Smirk (compileRegex, testMatch)
 import Smirk.Core.AST (AST (..), CharClass (..))
-import Smirk.Core.Compiler (compileRegex)
 import Smirk.Core.DPO.Mined
-import Smirk.Core.Parser (parseRegex)
-import Smirk.Engine.VM (matchRegex)
+import Smirk.Core.Parser (parsePCRE)
 
 spec :: Spec
 spec = describe "Smirk.Core.DPO.Mined" $ do
   describe "mineDPORules" $ do
     it "mines disjoint class fusion on disjoint literal alternations" $ do
-      case parseRegex "a|b" of
+      case parsePCRE "a|b" of
         Left err  -> expectationFailure $ "Parse failed: " ++ show err
         Right ast -> do
           let rules = mineDPORules ast
@@ -46,7 +45,7 @@ spec = describe "Smirk.Core.DPO.Mined" $ do
         _ -> expectationFailure "Expected DisjointCharClasses condition"
 
     it "mines bounded repetition rules on bounded repeat patterns" $ do
-      case parseRegex "a{2,5}" of
+      case parsePCRE "a{2,5}" of
         Left err  -> expectationFailure $ "Parse failed: " ++ show err
         Right ast -> do
           let rules = mineDPORules ast
@@ -58,7 +57,7 @@ spec = describe "Smirk.Core.DPO.Mined" $ do
             _ -> expectationFailure "Expected BoundedRepetitionNonOverlap 2 5"
 
     it "mines non-nullable prefix hoisting rules on sequential patterns" $ do
-      case parseRegex "abc.*" of
+      case parsePCRE "abc.*" of
         Left err  -> expectationFailure $ "Parse failed: " ++ show err
         Right ast -> do
           let rules = mineDPORules ast
@@ -71,14 +70,14 @@ spec = describe "Smirk.Core.DPO.Mined" $ do
     it "preserves regex match semantics on test corpus" $ do
       let patternStrs = ["a|b", "[0-9]|\\D", "hello.*world", "a{2,4}b"]
       mapM_ (\p -> do
-        case (parseRegex p, compileRegex p) of
+        case (parsePCRE p, compileRegex p) of
           (Right ast, Right reg) -> do
             let rules = mineDPORules ast
                 optReg = optimizeRegexWithMinedRules rules reg
             -- Verify identical behavior on positive and negative inputs
-            matchRegex optReg "a" `shouldBe` matchRegex reg "a"
-            matchRegex optReg "b" `shouldBe` matchRegex reg "b"
-            matchRegex optReg "hello there world" `shouldBe` matchRegex reg "hello there world"
-            matchRegex optReg "xyz" `shouldBe` matchRegex reg "xyz"
+            testMatch optReg "a" `shouldBe` testMatch reg "a"
+            testMatch optReg "b" `shouldBe` testMatch reg "b"
+            testMatch optReg "hello there world" `shouldBe` testMatch reg "hello there world"
+            testMatch optReg "xyz" `shouldBe` testMatch reg "xyz"
           _ -> expectationFailure $ "Compilation failed for: " ++ show p
         ) patternStrs
