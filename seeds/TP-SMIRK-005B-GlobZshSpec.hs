@@ -10,6 +10,7 @@ Maintainer  : Nadia Chambers <nadia.yvette.chambers@ik.me>
 -}
 module GlobZshSpec (spec) where
 
+import Data.Text (Text)
 import Test.Hspec
 
 import Smirk (testMatch)
