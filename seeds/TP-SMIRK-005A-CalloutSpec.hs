@@ -21,6 +21,7 @@ import Smirk.Core.Types
   , MatchOutcome (..)
   , MatchResult (..)
   , MatchStatus (..)
+  , emptyCaptureSlots
   )
 import Smirk.Effect.Callout
   ( dispatchCallout
@@ -32,12 +33,12 @@ import Smirk.Effect.Callout
 spec :: Spec
 spec = describe "Smirk.Effect.Callout (Host-Effectful PCRE Callouts)" $ do
   it "dispatches callout payload to custom handler" $ do
-    let payload = CalloutPayload 1 (Just "test") 0 0 mempty ("hello" :: Text)
+    let payload = CalloutPayload 1 (Just "test") 0 0 (emptyCaptureSlots 0) ("hello" :: Text)
     dec <- dispatchCallout (\p -> pure (if p.calloutTag == Just "test" then ProceedMatch else ForceBacktrack)) payload
     dec `shouldBe` ProceedMatch
 
   it "verifies symbol-table lookup callout predicate" $ do
-    let payload = CalloutPayload 2 (Just "isConstructor") 0 0 mempty ("Foo" :: Text)
+    let payload = CalloutPayload 2 (Just "isConstructor") 0 0 (emptyCaptureSlots 0) ("Foo" :: Text)
     dec1 <- lookupSymbolCallout (\t -> pure (t == "isConstructor")) payload
     dec1 `shouldBe` ProceedMatch
     dec2 <- lookupSymbolCallout (\t -> pure (t == "isModule")) payload
