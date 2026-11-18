@@ -11,7 +11,7 @@ module SheafParallelSpec (spec) where
 import Test.Hspec
 import Data.Text (Text)
 import qualified Data.Text as T
-import Smirk.Core.Compiler (compileRegex)
+import Smirk (compileRegex)
 import Smirk.Sheaf.Parallel
 
 spec :: Spec
