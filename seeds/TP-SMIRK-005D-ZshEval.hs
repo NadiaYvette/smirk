@@ -105,30 +105,32 @@ evalZshExpansion envLookup ast = do
                then val
                else ValScalar (toScalar val)
 
-  -- 2. Quoting and array preservation interaction:
-  -- If outer context is quoted, arrays coalesce to scalars unless (@) flag is present.
-  let hasAtFlag = FlagAtArrayPreserve `elem` ast.expFlags
-      valQuoted = if ast.expQuoted && not hasAtFlag
-                    then ValScalar (toScalar rawVal)
-                    else rawVal
+  -- 2. Apply strip operators (#, ##, %, %%)
+  let valStripped = case ast.expStrip of
+        Just stripOp -> applyStrip stripOp rawVal
+        Nothing      -> rawVal
 
-  -- 3. Apply strip operators (#, ##, %, %%)
-  valStripped <- case ast.expStrip of
-    Just stripOp -> pure (applyStrip stripOp valQuoted)
-    Nothing      -> pure valQuoted
+  -- 3. Apply pattern substitutions (:s, :gs)
+  let valSubst = case ast.expSubst of
+        Just substOp -> applySubst substOp valStripped
+        Nothing      -> valStripped
 
-  -- 4. Apply pattern substitutions (:s, :gs)
-  valSubst <- case ast.expSubst of
-    Just substOp -> pure (applySubst substOp valStripped)
-    Nothing      -> pure valStripped
-
-  -- 5. Apply modifier flags (s/sep/, j/sep/)
+  -- 4. Apply modifier flags (s/sep/, j/sep/)
   let valFlagged = applyExpansionFlags ast.expFlags valSubst
 
-  -- 6. Apply subscript indexing [1] or [1,3]
-  case ast.expSubscript of
-    Just sub -> pure (applySubscript sub valFlagged)
-    Nothing  -> pure valFlagged
+  -- 5. Apply subscript indexing [1] or [1,3]
+  let valSubscripted = case ast.expSubscript of
+        Just sub -> applySubscript sub valFlagged
+        Nothing  -> valFlagged
+
+  -- 6. Quoting and array preservation interaction:
+  -- If outer context is quoted, arrays coalesce to scalars unless (@) flag is present.
+  let hasAtFlag = FlagAtArrayPreserve `elem` ast.expFlags
+      finalVal = if ast.expQuoted && not hasAtFlag
+                   then ValScalar (toScalar valSubscripted)
+                   else valSubscripted
+
+  pure finalVal
 
 -- | Apply splitting and joining flags to a 'TwoSortedVal'.
 applyExpansionFlags :: [ZshFlag] -> TwoSortedVal -> TwoSortedVal

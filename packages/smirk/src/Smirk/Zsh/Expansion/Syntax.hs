@@ -158,8 +158,7 @@ pRawExpansion = do
   mSubst <- optional pSubstOp
   sub2 <- optional pSubscript
   _ <- char '}'
-  sub3 <- optional pSubscript
-  let finalSub = sub1 <|> sub2 <|> sub3
+  let finalSub = sub1 <|> sub2
   pure (ZshParamExpansion False flags inner finalSub mStrip mSubst)
 
 -- | Top-level parser supporting optional enclosing double-quotes @\"${...}\"@.
