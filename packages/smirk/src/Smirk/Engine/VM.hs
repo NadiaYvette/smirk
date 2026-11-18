@@ -346,8 +346,12 @@ stepVMWithMetrics
   -> VMContext         -- ^ Step metrics accumulator
   -> Fuel              -- ^ Fuel limit
   -> MatchOutcome s
-stepVMWithMetrics mode regex target startIdx th stack ctx fuel =
-  case fuel of
+stepVMWithMetrics mode regex target startIdx th stack ctx fuel
+  | startIdx > seqLength target =
+      let metrics = buildStepMetrics fuel target ctx (length stack)
+      in MatchOutcome NoMatch metrics
+  | otherwise =
+      case fuel of
     StepBudget budget | ctx.vmStepsConsumed >= budget ->
       let metrics = buildStepMetrics fuel target ctx (1 + length stack)
           cont = MatchContinuation
@@ -481,17 +485,36 @@ stepVMWithMetrics mode regex target startIdx th stack ctx fuel =
                              , currentSteps     = steps'
                              }
                          [] ->
-                           let nextStart = startIdx + 1
-                               freshTh = ThreadState 0 nextStart (emptyCaptureSlots (regex.maxGroupIndex + 1))
-                           in MatchContinuation
-                             { savedMatchMode   = mode
-                             , savedRegex       = regex
-                             , savedTarget      = target
-                             , savedStartIndex  = nextStart
-                             , currentThread    = freshTh
-                             , backtrackStack   = []
-                             , currentSteps     = steps'
-                             }
+                           let isAnchored = case regex.program V.!? 0 of
+                                 Just (OpAnchor AnchorStart) -> True
+                                 Just (OpSaveStart 0) -> case regex.program V.!? 1 of
+                                   Just (OpAnchor AnchorStart) -> True
+                                   _ -> False
+                                 _ -> False
+                               nextStart = startIdx + 1
+                               len = seqLength target
+                           in if isAnchored || nextStart > len
+                                then
+                                  MatchContinuation
+                                    { savedMatchMode   = mode
+                                    , savedRegex       = regex
+                                    , savedTarget      = target
+                                    , savedStartIndex  = len + 1
+                                    , currentThread    = ThreadState (V.length prog + 1) (len + 1) (emptyCaptureSlots 0)
+                                    , backtrackStack   = []
+                                    , currentSteps     = steps'
+                                    }
+                                else
+                                  let freshTh = ThreadState 0 nextStart (emptyCaptureSlots (regex.maxGroupIndex + 1))
+                                  in MatchContinuation
+                                    { savedMatchMode   = mode
+                                    , savedRegex       = regex
+                                    , savedTarget      = target
+                                    , savedStartIndex  = nextStart
+                                    , currentThread    = freshTh
+                                    , backtrackStack   = []
+                                    , currentSteps     = steps'
+                                    }
                      AbortEvaluation ->
                        MatchContinuation
                          { savedMatchMode   = mode
