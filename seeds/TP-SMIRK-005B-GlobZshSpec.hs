@@ -90,5 +90,5 @@ spec = describe "Smirk.Glob.Zsh (Zsh Glob Qualifiers)" $ do
   describe "Bytecode Compilation with Callouts" $ do
     it "compiles Zsh glob to executable regex" $ do
       case compileZshGlob "*.hs(.)" of
-        Right reg -> testMatch reg "Main.hs" `shouldBe` True
+        Right reg -> testMatch reg ("Main.hs" :: Text) `shouldBe` True
         Left err  -> expectationFailure (show err)
