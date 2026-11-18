@@ -26,7 +26,6 @@ import Smirk.Core.Types
 import Smirk.Effect.Callout
   ( dispatchCallout
   , lookupSymbolCallout
-  , resumeFromCalloutDecision
   , withSymbolTableCallout
   )
 

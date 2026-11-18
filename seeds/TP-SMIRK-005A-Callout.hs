@@ -58,7 +58,6 @@ import Smirk.Engine.VM (resumeMatchWithMetrics, runMatchWithMetrics)
 -- | Dispatch an inspection payload to an arbitrary host effect handler.
 {-# INLINE dispatchCallout #-}
 dispatchCallout ::
-  Monad m =>
   (CalloutPayload s -> m CalloutDecision)
   -- ^ Host effectful handler callback
   -> CalloutPayload s

@@ -80,7 +80,7 @@ func main() {
 	if !strings.Contains(cabalStr, "ZshExpansionEvalSpec") {
 		cabalStr = strings.Replace(cabalStr,
 			"        CalloutSpec\n",
-			"        CalloutSpec\n      , ZshExpansionEvalSpec\n", 1)
+			"        CalloutSpec\n        ZshExpansionEvalSpec\n", 1)
 	}
 	if err := os.WriteFile(cabalPath, []byte(cabalStr), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", cabalPath, err)
