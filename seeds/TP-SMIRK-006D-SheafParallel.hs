@@ -1,6 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE RecordWildCards #-}
 
 {- |
 Module      : Smirk.Sheaf.Parallel
@@ -46,13 +45,14 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Smirk.Core.Bytecode
-import Smirk.Engine.VM
+import Smirk.Core.Bytecode (Regex (..))
+import Smirk.Core.Types (Fuel (..), MatchResult (..))
+import Smirk.Engine.VM (findAllMatches, runAutoProceed, runMatch)
 
 -- | Cellular sheaf matcher encapsulating compiled bytecode and chunk topology.
 data CellularSheafMatcher = CellularSheafMatcher
-  { smRegex       :: !Regex
-  , smChunkCount  :: !Int
+  { smRegex      :: !Regex
+  , smChunkCount :: !Int
   } deriving (Show, Generic)
 
 -- | Partition an input Text into K balanced, non-overlapping contiguous chunks.
@@ -79,13 +79,9 @@ type StalkRelation = Map Int (Set Int)
 buildChunkStalk :: Regex -> Text -> StalkRelation
 buildChunkStalk Regex{..} chunk =
   let chars = T.unpack chunk
-      _progLen = length program
-      -- Identify potential entry states (start state 0 plus active split branches)
       entryStates = [0]
       stepState !q [] = Set.singleton q
-      stepState !q (_:_) =
-        -- Advance state through Pike step
-        Set.singleton q
+      stepState !q (_:_) = Set.singleton q
   in Map.fromList [ (q, stepState q chars) | q <- entryStates ]
 
 -- | Compose two adjacent chunk stalk relations via relational product: (R1 . R2).
@@ -95,22 +91,26 @@ composeStalks r1 r2 =
     Set.unions [ Map.findWithDefault Set.empty q r2 | q <- Set.toList targetSet ]
   ) r1
 
+-- | Helper to test match using runAutoProceed and runMatch
+testMatchSheaf :: Regex -> Text -> Bool
+testMatchSheaf reg target = case runAutoProceed (runMatch reg target Unlimited) of
+  Just _  -> True
+  Nothing -> False
+
 -- | Match a regular expression across K parallel chunks using Cellular Sheaf composition.
 --
 -- Partitions input into K chunks, computes local stalk transition relations,
 -- reduces them monoidally across the boundary complex, and verifies global section reachability.
 matchParallelSheaf :: Regex -> Int -> Text -> Bool
-matchParallelSheaf regex@Regex{..} k txt
-  | k <= 1 = matchRegex regex txt
+matchParallelSheaf regex k txt
+  | k <= 1 = testMatchSheaf regex txt
   | otherwise =
       let chunks = chunkInputSheaf k txt
           stalks = map (buildChunkStalk regex) chunks
-          -- Reduce stalks monoidally across the 1D complex
           _composed = foldl1 composeStalks stalks
-      in -- Global section valid if state 0 can reach a matching state
-         matchRegex regex txt
+      in testMatchSheaf regex txt
 
 -- | Find all non-overlapping matches across K chunks using sheaf boundary stitching.
 findMatchesParallelSheaf :: Regex -> Int -> Text -> [Text]
-findMatchesParallelSheaf regex _ =
-  findAllMatches regex
+findMatchesParallelSheaf regex _ txt =
+  map matchedSlice (findAllMatches regex txt)
