@@ -46,7 +46,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Smirk (compileGlob, testMatch)
+import Smirk (compileWildcard, testMatch)
 import Smirk.Zsh.Expansion.Syntax
   ( StripOp (..)
   , Subscript (..)
@@ -98,7 +98,12 @@ evalZshExpansion envLookup ast = do
     Left varName -> case envLookup varName of
       Just val -> pure val
       Nothing  -> Left ("Variable not found in environment: " <> varName)
-    Right innerAst -> evalZshExpansion envLookup innerAst
+    Right innerAst -> do
+      val <- evalZshExpansion envLookup innerAst
+      let innerHasAt = FlagAtArrayPreserve `elem` innerAst.expFlags
+      pure $ if innerHasAt
+               then val
+               else ValScalar (toScalar val)
 
   -- 2. Quoting and array preservation interaction:
   -- If outer context is quoted, arrays coalesce to scalars unless (@) flag is present.
@@ -176,17 +181,17 @@ applyStrip stripOp = \case
   ValArray arr  -> ValArray (smallArrayFromList (map (stripText stripOp) (smallArrayToList arr)))
   where
     stripText op txt = case op of
-      StripSuffixGreedy pat -> stripSuffixBy (compileGlob (pat <> "$")) True txt
-      StripSuffixNonGreedy pat -> stripSuffixBy (compileGlob (pat <> "$")) False txt
-      StripPrefixGreedy pat -> stripPrefixBy (compileGlob ("^" <> pat)) True txt
-      StripPrefixNonGreedy pat -> stripPrefixBy (compileGlob ("^" <> pat)) False txt
+      StripSuffixGreedy pat -> stripSuffixBy (compileWildcard pat) True txt
+      StripSuffixNonGreedy pat -> stripSuffixBy (compileWildcard pat) False txt
+      StripPrefixGreedy pat -> stripPrefixBy (compileWildcard pat) True txt
+      StripPrefixNonGreedy pat -> stripPrefixBy (compileWildcard pat) False txt
 
     stripSuffixBy (Right reg) greedy txt =
       let len = T.length txt
           suffixes = if greedy
                        then [ (i, T.drop i txt) | i <- [0 .. len] ]
                        else [ (i, T.drop i txt) | i <- reverse [0 .. len] ]
-          matches = [ i | (i, s) <- suffixes, testMatch reg s ]
+          matches = [ i | (i, s) <- suffixes, testMatch reg (s :: Text) ]
       in case matches of
            (cutIdx : _) -> T.take cutIdx txt
            []           -> txt
@@ -197,7 +202,7 @@ applyStrip stripOp = \case
           prefixes = if greedy
                        then [ (i, T.take i txt) | i <- reverse [0 .. len] ]
                        else [ (i, T.take i txt) | i <- [0 .. len] ]
-          matches = [ i | (i, p) <- prefixes, testMatch reg p ]
+          matches = [ i | (i, p) <- prefixes, testMatch reg (p :: Text) ]
       in case matches of
            (cutIdx : _) -> T.drop cutIdx txt
            []           -> txt
