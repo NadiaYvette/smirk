@@ -13,6 +13,7 @@ import qualified VMSpec
 import qualified SequenceSpec
 import qualified QuoteSpec
 import qualified GlobSpec
+import qualified ZshExpansionSyntaxSpec
 import qualified GlobZshSpec
 import qualified BatchSpec
 import qualified NetworkFilterSpec
@@ -32,6 +33,7 @@ main = hspec $ do
   SequenceSpec.spec
   QuoteSpec.spec
   GlobSpec.spec
+  ZshExpansionSyntaxSpec.spec
   GlobZshSpec.spec
   BatchSpec.spec
   NetworkFilterSpec.spec

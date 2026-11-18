@@ -76,6 +76,7 @@ library
         Smirk.Engine.Sequence
         Smirk.Engine.VM
         Smirk.Glob
+        Smirk.Zsh.Expansion.Syntax
         Smirk.Glob.Zsh
         Smirk.Continuation.Batch
         Smirk.Continuation.NetworkFilter
@@ -99,6 +100,7 @@ test-suite smirk-test
     hs-source-dirs:     test
     main-is:            Spec.hs
     other-modules:
+        ZshExpansionSyntaxSpec
         GlobZshSpec
         DPOMinedSpec
         SheafParallelSpec
