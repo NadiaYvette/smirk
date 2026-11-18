@@ -74,8 +74,8 @@ func main() {
 	cabalStr := string(cabalBytes)
 	if !strings.Contains(cabalStr, "Smirk.Effect.Callout") {
 		cabalStr = strings.Replace(cabalStr,
-			"        Smirk.Effect.Telemetry\n",
-			"        Smirk.Effect.Telemetry\n      , Smirk.Effect.Callout\n", 1)
+			"      , Smirk.Continuation.Cooperative\n",
+			"      , Smirk.Continuation.Cooperative\n      , Smirk.Effect.Callout\n", 1)
 	}
 	if !strings.Contains(cabalStr, "CalloutSpec") {
 		cabalStr = strings.Replace(cabalStr,

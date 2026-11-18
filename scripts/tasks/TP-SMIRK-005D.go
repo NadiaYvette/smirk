@@ -74,8 +74,8 @@ func main() {
 	cabalStr := string(cabalBytes)
 	if !strings.Contains(cabalStr, "Smirk.Zsh.Expansion.Eval") {
 		cabalStr = strings.Replace(cabalStr,
-			"        Smirk.Effect.Callout\n",
-			"        Smirk.Effect.Callout\n      , Smirk.Zsh.Expansion.Eval\n", 1)
+			"      , Smirk.Effect.Callout\n",
+			"      , Smirk.Effect.Callout\n      , Smirk.Zsh.Expansion.Eval\n", 1)
 	}
 	if !strings.Contains(cabalStr, "ZshExpansionEvalSpec") {
 		cabalStr = strings.Replace(cabalStr,
